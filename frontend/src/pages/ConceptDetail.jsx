@@ -7,7 +7,7 @@ import {
   MapTrifold, GraduationCap, FilmReel, ChatTeardropDots, ImageSquare,
   PaperPlaneTilt, ArrowLeft, Clock, CircleNotch, CheckSquare, Square,
   BookOpen, ArrowSquareOut, Question, Lightning, FileText, Books, Code,
-  GraduationCap as CourseIcon, ArticleMedium
+  GraduationCap as CourseIcon, ArticleMedium, DownloadSimple, FilePdf, FileMd
 } from "@phosphor-icons/react";
 
 const TABS = [
@@ -104,9 +104,12 @@ export default function ConceptDetail() {
 
   return (
     <div data-testid="concept-detail-page" className="mx-auto max-w-7xl px-6 py-10">
-      <Link to="/app" data-testid="back-to-dashboard" className="inline-flex items-center gap-2 font-mono text-xs uppercase tracking-widest text-zinc-600 hover:text-black">
-        <ArrowLeft size={14} weight="bold" /> back to dashboard
-      </Link>
+      <div className="flex items-center justify-between gap-4 flex-wrap">
+        <Link to="/app" data-testid="back-to-dashboard" className="inline-flex items-center gap-2 font-mono text-xs uppercase tracking-widest text-zinc-600 hover:text-black">
+          <ArrowLeft size={14} weight="bold" /> back to dashboard
+        </Link>
+        <ExportMenu concept={concept} />
+      </div>
 
       <header className="mt-4 border-b border-black pb-8">
         <div className="label-tag mb-2">// CONCEPT // LEVEL: {concept.level}</div>
@@ -559,3 +562,95 @@ function GeneratingView({ concept }) {
   );
 }
 
+
+
+function ExportMenu({ concept }) {
+  const [open, setOpen] = useState(false);
+  const [busy, setBusy] = useState(null); // 'md' | 'pdf' | null
+
+  const isReady = !concept.status || concept.status === "ready";
+
+  const handleDownload = async (fmt) => {
+    if (!isReady) {
+      toast.error("Concept must finish generating before export");
+      return;
+    }
+    setBusy(fmt);
+    try {
+      const r = await apiClient.get(`/concepts/${concept.id}/export?format=${fmt}`, {
+        responseType: "blob",
+      });
+      const blob = new Blob([r.data], {
+        type: fmt === "md" ? "text/markdown;charset=utf-8" : "application/pdf",
+      });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      const safe = (concept.name || "concept").replace(/[^a-z0-9_\- ]+/gi, "").trim().replace(/\s+/g, "_").slice(0, 80) || "concept";
+      a.download = `${safe}.${fmt}`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+      toast.success(`Exported as .${fmt}`);
+      setOpen(false);
+    } catch (e) {
+      toast.error(formatErr(e));
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  // close on outside click
+  useEffect(() => {
+    if (!open) return;
+    const onClick = (e) => {
+      if (!e.target.closest('[data-export-menu]')) setOpen(false);
+    };
+    window.addEventListener("click", onClick);
+    return () => window.removeEventListener("click", onClick);
+  }, [open]);
+
+  return (
+    <div data-export-menu className="relative">
+      <button
+        data-testid="export-menu-btn"
+        disabled={!isReady}
+        onClick={(e) => { e.stopPropagation(); setOpen((v) => !v); }}
+        className="brut-btn brut-btn-ghost"
+      >
+        <DownloadSimple size={14} weight="bold" /> Export
+      </button>
+      {open && (
+        <div data-testid="export-menu" className="absolute right-0 mt-2 w-56 border border-black bg-white z-50 shadow-[6px_6px_0_0_#09090B]">
+          <button
+            data-testid="export-md-btn"
+            disabled={busy !== null}
+            onClick={() => handleDownload("md")}
+            className="w-full flex items-center gap-3 px-4 py-3 hover:bg-zinc-100 text-left border-b border-black"
+          >
+            <FileMd size={18} weight="duotone" className="text-[#002FA7]" />
+            <div className="flex-1">
+              <div className="font-display font-bold text-sm">Markdown</div>
+              <div className="font-mono text-[10px] text-zinc-500">.md · portable plain text</div>
+            </div>
+            {busy === "md" && <CircleNotch className="animate-spin" size={14} weight="bold" />}
+          </button>
+          <button
+            data-testid="export-pdf-btn"
+            disabled={busy !== null}
+            onClick={() => handleDownload("pdf")}
+            className="w-full flex items-center gap-3 px-4 py-3 hover:bg-zinc-100 text-left"
+          >
+            <FilePdf size={18} weight="duotone" className="text-[#002FA7]" />
+            <div className="flex-1">
+              <div className="font-display font-bold text-sm">PDF</div>
+              <div className="font-mono text-[10px] text-zinc-500">.pdf · print-ready</div>
+            </div>
+            {busy === "pdf" && <CircleNotch className="animate-spin" size={14} weight="bold" />}
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}

@@ -1,0 +1,36 @@
+{
+  "summary": "Iteration 5 (P2) — Dashboard library search/filter/sort + ConceptDetail export (MD/PDF). Backend: 7/7 new pytest tests in test_export.py PASS in ~5s (md happy path, pdf happy path, invalid format 400, cross-user 404, unauthenticated 401, generating 409). Frontend: logged in as learner@conceptforge.app, library-toolbar with search/level filter/status filter/sort dropdown all render and behave correctly (Quicksort search → 1 of 5; impossible search → no-results state; clear restores; filter-level-intermediate → 2 cards; reset → 5; sort dropdown reorders, A→Z verified alphabetic). On ConceptDetail (Quicksort algorithm): export-menu-btn visible & enabled; opens menu with export-md-btn and export-pdf-btn; outside-click closes menu; MD download fires with filename 'Quicksort_algorithm.md' and body starts with '# Quicksort algorithm'; PDF download fires with filename 'Quicksort_algorithm.pdf', valid %PDF- header, 84,344 bytes. Regression: roadmap progress toggle still updates 0%→11% and resources tab still renders 5 categories. No console errors, no broken integrations.",
+  "backend_issues": { "critical": [], "minor": [] },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_export.py",
+    "/app/backend/tests/test_conceptforge.py",
+    "/app/test_reports/pytest/pytest_export.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "Export endpoint implementation is clean: format validated against {md, pdf} → 400, ownership query {id, user_id} → 404 covers cross-user case naturally, status guard for non-ready concepts → 409, PDF generated via asyncio.to_thread(weasyprint) so event loop is never blocked. Content-Disposition uses _safe_filename which strips non-alnum and limits to 80 chars — matches the client-side filename sanitizer in ExportMenu, so suggested_filename and server filename agree.",
+    "_build_concept_markdown produces a well-structured document: H1 title, Summary, Prerequisites, Roadmap with milestone checkboxes (- [ ] / - [x]) reflecting saved progress, topics+key_questions+exercise per milestone, Study Guide, Resources grouped by category with markdown links, Videos with links. Good handling of legacy concepts: missing fields are silently skipped rather than crashing.",
+    "ExportMenu component closes correctly on outside click via window click listener checking closest('[data-export-menu]'). The button has e.stopPropagation() so the menu doesn't immediately close itself on the same click — correct.",
+    "ExportMenu uses responseType='blob' with axios so binary PDF is preserved. Filename is derived client-side identically to server, so even if the server attachment header changed format, the download would still get the right name.",
+    "Dashboard LibrarySection uses useMemo to compute counts and filtered list — efficient. Search is case-insensitive (name.toLowerCase().includes(q.toLowerCase())). Sort 'progress' uses (progress.length/milestone_count) ratio which handles cards with different milestone counts. 'newest'/'oldest' sort by created_at.",
+    "Minor (not blocking): The export endpoint's status guard is `status not in (None, 'ready')` which correctly returns 409 for 'generating' and 'failed'. Consider explicit error text ('Concept generation failed' vs 'Concept is not ready yet') for failed state for better UX, but not required by the iteration spec.",
+    "Minor: PDF generation is sync-bound to weasyprint; for very large study guides this could be 1-3s. asyncio.to_thread is the right mitigation — confirmed; in tests PDF returned in ~3s. No improvement needed.",
+    "Minor (security audit): _safe_filename strips quotes/backslashes, so injection into Content-Disposition is not possible. Verified the regex r'[^a-zA-Z0-9_\\- ]+' which drops every special char including CRLF — safe."
+  ],
+  "updated_files": ["/app/backend/tests/test_export.py"],
+  "success_rate": {
+    "backend": "100% (7/7 new export tests + previous 23/23 still green)",
+    "frontend": "100% (toolbar render, search, clear, no-results, level filter, sort reorder/AZ, export menu open/close/outside-click, MD download, PDF download, progress toggle regression, resources tab regression)"
+  },
+  "test_credentials": "learner@conceptforge.app / learner123 (5 ready concepts); admin@conceptforge.app / admin123",
+  "seed_data_creation": "Backend test created one ephemeral user test_exp_<runid>@conceptforge.app and one transient 'ExportTest_<runid>' concept (deleted in fixture finally block). No persistent test data left in learner library — only the 'Quicksort algorithm' from iteration 4 remains.",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Iteration 5 fully passes. Export endpoint: GET /api/concepts/{id}/export?format=md|pdf, requires auth, returns 400 (bad format), 404 (cross-user or not found), 409 (status != ready). Frontend testids: library-toolbar, library-search-input, library-search-clear, filter-level-{all|beginner|intermediate|advanced}, filter-status-{all|ready|generating}, library-sort, no-results, export-menu-btn, export-menu, export-md-btn, export-pdf-btn. The library-search-input shows results after typing; library-search-clear button only appears when search has text. Dashboard initial state shows '0 of 0 shown' briefly with 'Loading library' before cards mount — wait for [data-testid^=\"open-concept-\"] not [data-testid=\"library-section\"] to ensure cards rendered. Filename downloaded matches server's _safe_filename rule (alnum/space/underscore/hyphen, spaces → underscores, max 80 chars).",
+  "rca of the issue": "No issues found. All acceptance criteria pass on first run for both backend and frontend."
+}
