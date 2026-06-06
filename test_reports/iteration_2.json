@@ -1,0 +1,45 @@
+{
+  "summary": "Iteration 2 tested progress-tracking + badge-removal. Backend is fully green (23/23 pytest cases pass, including 6 new progress tests covering toggle on/off/idempotent, persistence on GET, milestone_count + progress in list, 400 out-of-range, 404 cross-user, and heavy fields excluded from list). Frontend is BROKEN: opening any concept detail page throws an uncaught ReferenceError 'toggleMilestone is not defined' and the entire page fails to render — the Roadmap tab, progress card, milestone checkboxes, and all other tabs are unreachable. 'Made with Emergent' badge confirmed removed.",
+  "backend_issues": { "critical": [], "minor": [] },
+  "frontend_issues": {
+    "ui_bugs": [
+      {
+        "component": "ConceptDetail",
+        "issue": "ReferenceError: toggleMilestone is not defined. Line 80 of /app/frontend/src/pages/ConceptDetail.jsx passes onToggle={toggleMilestone} but the function is never defined in the ConceptDetail component. The whole concept detail page crashes with an uncaught runtime error overlay, so the Roadmap tab, progress card, milestone checkboxes, study guide, videos, image, AND tutor tab are ALL broken — not just the toggle.",
+        "selector": "[data-testid=\"roadmap-tab\"], [data-testid=\"milestone-toggle-0\"]",
+        "priority": "CRITICAL"
+      }
+    ],
+    "integration_issues": [
+      {
+        "flow": "Milestone toggle → PATCH /api/concepts/{id}/progress",
+        "issue": "Cannot reach UI because page crashes. Backend endpoint works correctly (verified via pytest), but frontend never sends the request because the component fails to mount.",
+        "affected_selectors": ["[data-testid=\"milestone-toggle-<i>\"]", "[data-testid=\"progress-percent\"]"]
+      }
+    ],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_conceptforge.py",
+    "/app/test_reports/pytest/pytest_results.xml"
+  ],
+  "action_items": [
+    "Add a toggleMilestone(index, completed) function inside ConceptDetail() that: (a) optimistically updates concept.progress in local state, (b) calls apiClient.patch(`/concepts/${id}/progress`, {index, completed}), (c) on success replaces progress with server response, (d) on error reverts and toasts the message. Pass it as onToggle to RoadmapTab. Without this fix, the entire detail page is unusable."
+  ],
+  "critical_code_review_comments": [
+    "ConceptDetail.jsx line 80 references undefined `toggleMilestone` — a missed implementation. This kind of bug is exactly what an ErrorBoundary would surface gracefully; consider adding one around route content in App.jsx so partial failures don't blank the whole page.",
+    "RoadmapTab computes progress from concept.progress prop but parent never updates concept state when the toggle fires, so once toggleMilestone is added it must also call setConcept(...) (or refetch) to keep UI consistent across tabs.",
+    "Dashboard.jsx uses c.milestone_count > 0 to gate progress bar — good. But the heavy field exclusion in GET /api/concepts means roadmap is dropped; ensure no other dashboard code still expects c.roadmap (verified: it doesn't).",
+    "index.html still loads https://assets.emergent.sh/scripts/emergent-main.js — if the goal was a full Emergent-free build, this script also needs removing. Otherwise badge-removal is purely cosmetic (the script itself injects nothing visible right now, confirmed)."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_conceptforge.py"
+  ],
+  "success_rate": { "backend": "100% (23/23)", "frontend": "0% — concept detail page crashes on mount" },
+  "test_credentials": "admin@conceptforge.app / admin123 (seeded); per-run unique test_a_<id>@/test_b_<id>@ registered fresh each pytest run",
+  "seed_data_creation": "Each pytest run registers two ephemeral users; one concept ('Python lists' beginner) generated and deleted at end of test. During frontend testing one concept was also generated for admin and remains in DB.",
+  "retest_needed": true,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Backend is fully covered by /app/backend/tests/test_conceptforge.py (23 tests, ~58s). Frontend re-test should: (1) login as admin, (2) open existing 'Python lists' concept in admin library, (3) confirm no runtime error overlay, (4) click [data-testid=milestone-toggle-0], (5) verify [data-testid=progress-percent] increases, (6) reload and verify persistence, (7) return to /app and verify dashboard concept card shows updated 'X / N' and progress bar. The toggleMilestone fix is a small ~10 line addition inside ConceptDetail() — fully within main agent's scope.",
+  "rca of the issue": "RCA: In /app/frontend/src/pages/ConceptDetail.jsx the JSX `<RoadmapTab concept={concept} onToggle={toggleMilestone} />` (line 80) references an identifier `toggleMilestone` that is never declared in the enclosing ConceptDetail function (no const/function/let with that name anywhere in the file). JS evaluates JSX prop expressions eagerly, so ReactDOM throws ReferenceError on first render of the component, which is caught by the react-dev-overlay producing the red 'Uncaught runtime errors' screen. Reproduction: login → generate any concept → page lands at /app/concept/<id> → red error overlay appears immediately, body innerText empty. Mitigation: define the function (call PATCH /api/concepts/{id}/progress with {index, completed}, update concept state with response, handle errors via toast)."
+}

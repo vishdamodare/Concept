@@ -5,7 +5,7 @@ import { toast } from "sonner";
 import Markdown from "../components/Markdown";
 import {
   MapTrifold, GraduationCap, FilmReel, ChatTeardropDots, ImageSquare,
-  PaperPlaneTilt, ArrowLeft, Clock, CircleNotch
+  PaperPlaneTilt, ArrowLeft, Clock, CircleNotch, CheckSquare, Square
 } from "@phosphor-icons/react";
 
 const TABS = [
@@ -77,7 +77,7 @@ export default function ConceptDetail() {
       </div>
 
       <section className="mt-8">
-        {tab === "roadmap" && <RoadmapTab concept={concept} />}
+        {tab === "roadmap" && <RoadmapTab concept={concept} onToggle={toggleMilestone} />}
         {tab === "guide" && <GuideTab concept={concept} />}
         {tab === "videos" && <VideosTab concept={concept} />}
         {tab === "image" && <ImageTab concept={concept} />}
@@ -87,12 +87,31 @@ export default function ConceptDetail() {
   );
 }
 
-function RoadmapTab({ concept }) {
+function RoadmapTab({ concept, onToggle }) {
   const rm = concept.roadmap || {};
   const milestones = rm.milestones || [];
+  const done = new Set(concept.progress || []);
+  const total = milestones.length;
+  const completedCount = milestones.reduce((acc, _, i) => acc + (done.has(i) ? 1 : 0), 0);
+  const pct = total === 0 ? 0 : Math.round((completedCount / total) * 100);
+
   return (
     <div data-testid="roadmap-tab" className="grid grid-cols-12 gap-6">
-      <div className="col-span-12 md:col-span-4">
+      <div className="col-span-12 md:col-span-4 space-y-4">
+        <div data-testid="progress-card" className="brut-card p-6">
+          <div className="label-tag mb-2">// PROGRESS</div>
+          <div className="flex items-baseline gap-2">
+            <div data-testid="progress-percent" className="font-display text-5xl font-black text-[#002FA7] leading-none">{pct}%</div>
+            <div className="font-mono text-xs text-zinc-600">{completedCount} / {total} done</div>
+          </div>
+          <div className="mt-4 h-2 w-full border border-black bg-white relative overflow-hidden">
+            <div className="absolute inset-y-0 left-0 bg-[#002FA7] transition-all" style={{ width: `${pct}%` }} />
+          </div>
+          {pct === 100 && total > 0 && (
+            <div className="mt-3 font-mono text-xs text-[#10B981] font-bold">✓ MASTERED</div>
+          )}
+        </div>
+
         <div className="brut-card p-6">
           <div className="label-tag mb-2">// PREREQUISITES</div>
           {(rm.prerequisites || []).length === 0 ? (
@@ -110,31 +129,52 @@ function RoadmapTab({ concept }) {
       <div className="col-span-12 md:col-span-8">
         <div className="label-tag mb-3">// LEARNING PATH</div>
         <div className="space-y-3">
-          {milestones.map((m, i) => (
-            <div data-testid={`milestone-${i}`} key={i} className="brut-card p-6">
-              <div className="flex items-start justify-between gap-3">
-                <div className="font-display text-5xl font-black text-[#002FA7] leading-none w-14 shrink-0">
-                  {String(i + 1).padStart(2, "0")}
-                </div>
-                <div className="flex-1">
-                  <div className="font-display text-xl font-bold leading-tight">{m.title}</div>
-                  <p className="mt-2 font-mono text-sm text-zinc-700 leading-relaxed">{m.description}</p>
-                  {m.topics && m.topics.length > 0 && (
-                    <div className="mt-3 flex flex-wrap gap-2">
-                      {m.topics.map((t, k) => (
-                        <span key={k} className="border border-black px-2 py-0.5 font-mono text-[11px]">{t}</span>
-                      ))}
+          {milestones.map((m, i) => {
+            const isDone = done.has(i);
+            return (
+              <div
+                data-testid={`milestone-${i}`}
+                key={i}
+                className={`brut-card p-6 transition ${isDone ? "bg-zinc-50" : ""}`}
+              >
+                <div className="flex items-start justify-between gap-3">
+                  <button
+                    data-testid={`milestone-toggle-${i}`}
+                    onClick={() => onToggle(i, !isDone)}
+                    aria-label={isDone ? "Mark incomplete" : "Mark complete"}
+                    className={`mt-1 shrink-0 transition ${isDone ? "text-[#10B981]" : "text-zinc-400 hover:text-black"}`}
+                  >
+                    {isDone
+                      ? <CheckSquare size={28} weight="fill" />
+                      : <Square size={28} weight="regular" />}
+                  </button>
+                  <div className={`font-display text-5xl font-black leading-none w-14 shrink-0 ${isDone ? "text-zinc-300 line-through decoration-2" : "text-[#002FA7]"}`}>
+                    {String(i + 1).padStart(2, "0")}
+                  </div>
+                  <div className="flex-1">
+                    <div className={`font-display text-xl font-bold leading-tight ${isDone ? "text-zinc-500 line-through decoration-2" : ""}`}>
+                      {m.title}
                     </div>
-                  )}
-                  {m.estimate && (
-                    <div className="mt-3 inline-flex items-center gap-1 font-mono text-xs text-zinc-500">
-                      <Clock size={12} weight="bold" /> {m.estimate}
-                    </div>
-                  )}
+                    <p className={`mt-2 font-mono text-sm leading-relaxed ${isDone ? "text-zinc-400" : "text-zinc-700"}`}>
+                      {m.description}
+                    </p>
+                    {m.topics && m.topics.length > 0 && (
+                      <div className="mt-3 flex flex-wrap gap-2">
+                        {m.topics.map((t, k) => (
+                          <span key={k} className="border border-black px-2 py-0.5 font-mono text-[11px]">{t}</span>
+                        ))}
+                      </div>
+                    )}
+                    {m.estimate && (
+                      <div className="mt-3 inline-flex items-center gap-1 font-mono text-xs text-zinc-500">
+                        <Clock size={12} weight="bold" /> {m.estimate}
+                      </div>
+                    )}
+                  </div>
                 </div>
               </div>
-            </div>
-          ))}
+            );
+          })}
         </div>
       </div>
     </div>

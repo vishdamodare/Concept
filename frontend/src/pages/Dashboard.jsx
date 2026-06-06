@@ -178,7 +178,11 @@ export default function Dashboard() {
           </div>
         ) : (
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-            {items.map((c) => (
+            {items.map((c) => {
+              const pct = c.milestone_count
+                ? Math.round(((c.progress?.length || 0) / c.milestone_count) * 100)
+                : 0;
+              return (
               <div data-testid={`concept-card-${c.id}`} key={c.id} className="brut-card p-5 flex flex-col">
                 <div className="flex items-start justify-between">
                   <span className="label-tag">{c.level}</span>
@@ -192,6 +196,19 @@ export default function Dashboard() {
                   </button>
                 </div>
                 <div className="font-display text-xl font-bold mt-3 leading-tight line-clamp-2">{c.name}</div>
+
+                {c.milestone_count > 0 && (
+                  <div className="mt-4">
+                    <div className="flex items-center justify-between font-mono text-[10px] text-zinc-500 mb-1">
+                      <span>{c.progress?.length || 0} / {c.milestone_count}</span>
+                      <span>{pct}%</span>
+                    </div>
+                    <div className="h-1.5 w-full border border-black bg-white relative overflow-hidden">
+                      <div className="absolute inset-y-0 left-0 bg-[#002FA7] transition-all" style={{ width: `${pct}%` }} />
+                    </div>
+                  </div>
+                )}
+
                 <div className="mt-auto pt-4 flex items-center justify-between">
                   <span className="font-mono text-[10px] text-zinc-500">
                     {new Date(c.created_at).toLocaleDateString()}
@@ -205,7 +222,8 @@ export default function Dashboard() {
                   </Link>
                 </div>
               </div>
-            ))}
+              );
+            })}
           </div>
         )}
       </section>

@@ -122,7 +122,63 @@ class TestConcepts:
         assert r.status_code == 200
         items = r.json()
         assert isinstance(items, list)
-        assert any(c["id"] == TestConcepts.concept_id for c in items)
+        match = [c for c in items if c["id"] == TestConcepts.concept_id]
+        assert len(match) == 1
+        item = match[0]
+        # New fields for progress feature
+        assert "milestone_count" in item and isinstance(item["milestone_count"], int) and item["milestone_count"] >= 1
+        assert "progress" in item and isinstance(item["progress"], list)
+        # Heavy fields excluded
+        for heavy in ("study_guide", "videos", "image", "roadmap"):
+            assert heavy not in item, f"list response should not include heavy field {heavy}"
+
+    # ---- Progress tests ----
+    def test_progress_toggle_on(self, user_a_token):
+        cid = TestConcepts.concept_id
+        r = requests.patch(f"{API}/concepts/{cid}/progress", json={"index": 0, "completed": True},
+                           headers=H(user_a_token), timeout=15)
+        assert r.status_code == 200, r.text
+        data = r.json()
+        assert data["id"] == cid
+        assert 0 in data["progress"]
+        assert isinstance(data["total"], int) and data["total"] >= 1
+
+    def test_progress_idempotent(self, user_a_token):
+        cid = TestConcepts.concept_id
+        r1 = requests.patch(f"{API}/concepts/{cid}/progress", json={"index": 0, "completed": True},
+                            headers=H(user_a_token), timeout=15)
+        r2 = requests.patch(f"{API}/concepts/{cid}/progress", json={"index": 0, "completed": True},
+                            headers=H(user_a_token), timeout=15)
+        assert r1.json()["progress"] == r2.json()["progress"]
+
+    def test_progress_toggle_off(self, user_a_token):
+        cid = TestConcepts.concept_id
+        r = requests.patch(f"{API}/concepts/{cid}/progress", json={"index": 0, "completed": False},
+                           headers=H(user_a_token), timeout=15)
+        assert r.status_code == 200
+        assert 0 not in r.json()["progress"]
+
+    def test_progress_persists_on_get(self, user_a_token):
+        cid = TestConcepts.concept_id
+        # Set index 1 done
+        requests.patch(f"{API}/concepts/{cid}/progress", json={"index": 1, "completed": True},
+                       headers=H(user_a_token), timeout=15)
+        r = requests.get(f"{API}/concepts/{cid}", headers=H(user_a_token), timeout=15)
+        assert r.status_code == 200
+        body = r.json()
+        assert "progress" in body and 1 in body["progress"]
+
+    def test_progress_out_of_range(self, user_a_token):
+        cid = TestConcepts.concept_id
+        r = requests.patch(f"{API}/concepts/{cid}/progress", json={"index": 49, "completed": True},
+                           headers=H(user_a_token), timeout=15)
+        assert r.status_code == 400, f"expected 400, got {r.status_code} {r.text}"
+
+    def test_progress_cross_user_404(self, user_b_token):
+        cid = TestConcepts.concept_id
+        r = requests.patch(f"{API}/concepts/{cid}/progress", json={"index": 0, "completed": True},
+                           headers=H(user_b_token), timeout=15)
+        assert r.status_code == 404
 
     def test_get_concept(self, user_a_token):
         cid = TestConcepts.concept_id

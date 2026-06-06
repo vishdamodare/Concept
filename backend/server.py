@@ -98,6 +98,10 @@ class GenerateIn(BaseModel):
 class ChatIn(BaseModel):
     message: str = Field(min_length=1, max_length=2000)
 
+class ProgressIn(BaseModel):
+    index: int = Field(ge=0, le=49)
+    completed: bool
+
 # ----------------------------- AI Services ---------------------------
 
 ROADMAP_PROMPT = """You are an expert curriculum architect. For the concept "{name}" tailored to a {level} learner, produce a strictly valid JSON object.
@@ -308,6 +312,7 @@ async def generate_concept(body: GenerateIn, user: dict = Depends(get_current_us
         "study_guide": study_guide,
         "image": image_data_url,
         "videos": videos,
+        "progress": [],
         "created_at": now,
     }
     await db.concepts.insert_one(doc)
@@ -318,9 +323,16 @@ async def generate_concept(body: GenerateIn, user: dict = Depends(get_current_us
 async def list_concepts(user: dict = Depends(get_current_user)):
     cursor = db.concepts.find(
         {"user_id": user["id"]},
-        {"_id": 0, "study_guide": 0, "videos": 0, "roadmap": 0},
+        {"_id": 0, "study_guide": 0, "videos": 0, "image": 0,
+         "roadmap.summary": 0, "roadmap.prerequisites": 0, "roadmap.study_guide_outline": 0,
+         "roadmap.video_queries": 0, "roadmap.image_prompt": 0},
     ).sort("created_at", -1)
     items = await cursor.to_list(200)
+    for it in items:
+        milestones = (it.get("roadmap") or {}).get("milestones") or []
+        it["milestone_count"] = len(milestones)
+        it["progress"] = it.get("progress") or []
+        it.pop("roadmap", None)
     return items
 
 @api.get("/concepts/{concept_id}")
@@ -328,7 +340,28 @@ async def get_concept(concept_id: str, user: dict = Depends(get_current_user)):
     doc = await db.concepts.find_one({"id": concept_id, "user_id": user["id"]}, {"_id": 0})
     if not doc:
         raise HTTPException(status_code=404, detail="Concept not found")
+    doc.setdefault("progress", [])
     return doc
+
+@api.patch("/concepts/{concept_id}/progress")
+async def update_progress(concept_id: str, body: ProgressIn, user: dict = Depends(get_current_user)):
+    doc = await db.concepts.find_one({"id": concept_id, "user_id": user["id"]}, {"_id": 0, "progress": 1, "roadmap": 1})
+    if not doc:
+        raise HTTPException(status_code=404, detail="Concept not found")
+    milestones = (doc.get("roadmap") or {}).get("milestones") or []
+    if body.index >= len(milestones):
+        raise HTTPException(status_code=400, detail="Milestone index out of range")
+    current = set(doc.get("progress") or [])
+    if body.completed:
+        current.add(body.index)
+    else:
+        current.discard(body.index)
+    new_progress = sorted(current)
+    await db.concepts.update_one(
+        {"id": concept_id, "user_id": user["id"]},
+        {"$set": {"progress": new_progress}},
+    )
+    return {"id": concept_id, "progress": new_progress, "total": len(milestones)}
 
 @api.delete("/concepts/{concept_id}")
 async def delete_concept(concept_id: str, user: dict = Depends(get_current_user)):
