@@ -97,25 +97,79 @@ class TestConcepts:
 
     def test_generate_concept(self, user_a_token):
         payload = {"name": "Python lists", "level": "beginner"}
-        r = requests.post(f"{API}/concepts/generate", json=payload, headers=H(user_a_token), timeout=120)
+        # Step 1: POST returns within a couple of seconds with status=generating
+        t0 = time.time()
+        r = requests.post(f"{API}/concepts/generate", json=payload, headers=H(user_a_token), timeout=15)
+        elapsed = time.time() - t0
         assert r.status_code == 200, f"generate failed {r.status_code} {r.text[:500]}"
-        data = r.json()
-        # required fields
-        for f in ["id", "name", "level", "roadmap", "study_guide", "image", "videos"]:
+        init = r.json()
+        assert "id" in init and init["status"] == "generating"
+        assert init.get("stage") == "roadmap"
+        assert elapsed < 10, f"generate endpoint blocked for {elapsed}s, expected async (<10s)"
+        cid = init["id"]
+        TestConcepts.concept_id = cid
+
+        # Step 2: poll until status=ready (up to ~180s)
+        deadline = time.time() + 200
+        data = None
+        last_stage = None
+        while time.time() < deadline:
+            g = requests.get(f"{API}/concepts/{cid}", headers=H(user_a_token), timeout=20)
+            assert g.status_code == 200, f"GET concept failed {g.status_code} {g.text[:300]}"
+            data = g.json()
+            stage = data.get("stage")
+            if stage != last_stage:
+                print(f"[poll] status={data.get('status')} stage={stage}")
+                last_stage = stage
+            if data.get("status") == "ready":
+                break
+            if data.get("status") == "failed":
+                pytest.fail(f"generation failed: {data.get('error')}")
+            time.sleep(4)
+        assert data and data.get("status") == "ready", f"timed out waiting for ready, last={data and data.get('status')}"
+
+        # Step 3: validate enriched data shape
+        for f in ["id", "name", "level", "roadmap", "study_guide", "image", "videos", "resources"]:
             assert f in data, f"missing field {f}"
         assert data["name"] == "Python lists"
         assert data["level"] == "beginner"
         assert isinstance(data["roadmap"], dict)
-        assert "milestones" in data["roadmap"] and len(data["roadmap"]["milestones"]) >= 1
+        milestones = data["roadmap"].get("milestones") or []
+        assert 7 <= len(milestones) <= 9, f"expected 7-9 milestones, got {len(milestones)}"
+        for i, m in enumerate(milestones):
+            assert "title" in m and "description" in m, f"milestone {i} missing core fields"
+            assert isinstance(m.get("topics"), list) and len(m["topics"]) >= 1, f"milestone {i} missing topics"
+            assert isinstance(m.get("key_questions"), list) and len(m["key_questions"]) >= 1, \
+                f"milestone {i} missing key_questions"
+            assert isinstance(m.get("exercise"), str) and len(m["exercise"]) > 5, \
+                f"milestone {i} missing exercise"
+            assert "estimate" in m, f"milestone {i} missing estimate"
         assert "video_queries" in data["roadmap"]
-        assert isinstance(data["study_guide"], str) and len(data["study_guide"]) > 50
+        # Study guide should be much longer now (1100+ chars target)
+        assert isinstance(data["study_guide"], str) and len(data["study_guide"]) >= 1100, \
+            f"study_guide too short: {len(data['study_guide'])} chars"
         # image may be null (acceptable fallback) but if present must be data URL
         if data["image"] is not None:
             assert data["image"].startswith("data:")
         assert isinstance(data["videos"], list) and len(data["videos"]) >= 1
         v = data["videos"][0]
         assert "embed" in v and v["embed"].startswith("https://www.youtube.com/embed/")
-        TestConcepts.concept_id = data["id"]
+
+        # Resources validation
+        res = data.get("resources") or {}
+        cats = res.get("categories") or []
+        assert 3 <= len(cats) <= 6, f"expected 3-6 resource categories, got {len(cats)}"
+        valid_kinds = {"docs", "article", "course", "book", "paper", "tool"}
+        for ci, cat in enumerate(cats):
+            assert isinstance(cat.get("name"), str) and cat["name"]
+            items = cat.get("items") or []
+            assert len(items) >= 2, f"category '{cat['name']}' has fewer than 2 items"
+            for ii, it in enumerate(items):
+                assert isinstance(it.get("title"), str) and it["title"], f"cat {ci} item {ii} no title"
+                url = it.get("url") or ""
+                assert url.startswith("http://") or url.startswith("https://"), \
+                    f"cat {ci} item {ii} bad url: {url}"
+                assert it.get("kind") in valid_kinds, f"cat {ci} item {ii} bad kind: {it.get('kind')}"
 
     def test_list_concepts(self, user_a_token):
         r = requests.get(f"{API}/concepts", headers=H(user_a_token), timeout=15)

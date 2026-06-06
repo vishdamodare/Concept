@@ -8,9 +8,10 @@ const LEVELS = ["beginner", "intermediate", "advanced"];
 
 const STAGES = [
   "Drafting roadmap with Claude…",
-  "Writing study guide…",
+  "Writing in-depth study guide…",
   "Rendering blueprint with Gemini…",
-  "Curating videos…",
+  "Curating YouTube videos…",
+  "Scouring the web for resources…",
   "Stitching it together…",
 ];
 
@@ -63,7 +64,7 @@ export default function Dashboard() {
     setBusy(true);
     try {
       const r = await apiClient.post("/concepts/generate", { name, level: lvl });
-      toast.success("Concept forged");
+      toast.success("Forge started — opening live view");
       nav(`/app/concept/${r.data.id}`);
     } catch (e) {
       toast.error(formatErr(e));

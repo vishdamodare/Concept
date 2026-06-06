@@ -108,39 +108,81 @@ ROADMAP_PROMPT = """You are an expert curriculum architect. For the concept "{na
 
 Schema:
 {{
-  "summary": "2-3 sentence overview of what the learner will achieve",
-  "prerequisites": ["short prerequisite 1", "short prerequisite 2"],
+  "summary": "3-4 sentence overview that motivates the topic and previews what the learner will achieve",
+  "prerequisites": ["short prerequisite 1", "short prerequisite 2", "short prerequisite 3"],
   "milestones": [
     {{
-      "title": "Milestone title (short)",
-      "description": "1-2 sentences explaining the milestone",
-      "topics": ["topic 1", "topic 2", "topic 3"],
+      "title": "Milestone title (short, action-oriented)",
+      "description": "2-3 sentences explaining what the learner will understand or build after this milestone",
+      "topics": ["specific subtopic 1", "specific subtopic 2", "specific subtopic 3", "specific subtopic 4"],
+      "key_questions": ["A thought-provoking question this milestone answers", "another key question", "another key question"],
+      "exercise": "A concrete hands-on exercise or mini-project to cement the milestone (1-2 sentences)",
       "estimate": "~X hours"
     }}
   ],
   "video_queries": ["specific YouTube search query 1", "..."],
+  "search_queries": ["focused web search query to find articles/docs about subtopic 1", "..."],
   "image_prompt": "A clean, schematic, blueprint-style illustration prompt that visually represents the concept, avoid text in image",
-  "study_guide_outline": ["section 1", "section 2", "section 3", "section 4", "section 5"]
+  "study_guide_outline": ["section 1", "section 2", "section 3", "section 4", "section 5", "section 6", "section 7"]
 }}
 
 Rules:
 - Return ONLY raw JSON, no markdown fencing, no commentary.
-- 5 to 7 milestones, ordered from foundations to mastery.
-- 4 to 6 video_queries — concrete, learner-friendly YouTube search phrases.
-- Adjust depth based on level: beginner = gentle, advanced = expert-level.
+- 7 to 9 milestones, ordered from foundations to mastery. Each milestone must be substantive — no trivial steps.
+- Each milestone needs 3-5 topics, 2-3 key_questions, and exactly one exercise.
+- 5 to 6 video_queries — concrete, learner-friendly YouTube search phrases.
+- 5 to 7 search_queries — phrased like a researcher would search (e.g. "transformer attention math derivation", "REST vs gRPC tradeoffs").
+- Adjust depth based on level: beginner = gentle scaffolding, intermediate = practical depth, advanced = expert-level nuance and edge cases.
 """
 
-STUDY_GUIDE_PROMPT = """You are an expert teacher. Write a detailed study guide for "{name}" for a {level} learner.
+STUDY_GUIDE_PROMPT = """You are an expert teacher. Write an in-depth study guide for "{name}" tailored to a {level} learner.
 
-Structure with these markdown sections:
+Structure with these markdown sections (use exactly these H2 headings):
 - ## Why this matters
 - ## Core ideas
-- ## Step-by-step explanation
+- ## How it actually works (step-by-step)
 - ## Worked example
-- ## Common pitfalls
-- ## Practice questions (5 questions with brief answers)
+- ## Intuition & mental models
+- ## Common pitfalls and misconceptions
+- ## Going deeper (advanced angles)
+- ## Practice questions
 
-Tone: clear, conversational but rigorous. Use bullet lists where helpful. ~700-900 words. Output markdown only."""
+For "Practice questions": 6 questions, each with a 2-3 sentence answer below it.
+
+Tone: clear, conversational but rigorous. Use bullet lists, numbered steps, and short code blocks where they help. Target 1100-1400 words. Output markdown only — no preamble, no closing remarks."""
+
+RESOURCES_PROMPT = """You are an expert research librarian. For the concept "{name}" ({level} learner), here are real web search results gathered for you:
+
+{search_results}
+
+Task: From these results PLUS your own knowledge of canonical authoritative sources (e.g. official docs, MIT OCW, Stanford CS notes, Distill.pub, 3Blue1Brown, arXiv landmark papers, classic textbooks, Real Python, MDN, freeCodeCamp, etc.), build a curated, deduplicated resource library.
+
+Return STRICTLY valid JSON, no markdown fencing:
+{{
+  "categories": [
+    {{
+      "name": "Official documentation",
+      "items": [
+        {{ "title": "Resource title (concise)", "url": "https://...", "description": "Why this is worth reading in 1-2 sentences", "kind": "docs" }}
+      ]
+    }},
+    {{ "name": "In-depth articles & tutorials", "items": [...] }},
+    {{ "name": "Free courses & lectures", "items": [...] }},
+    {{ "name": "Books", "items": [...] }},
+    {{ "name": "Research papers & whitepapers", "items": [...] }},
+    {{ "name": "Tools, repos & playgrounds", "items": [...] }}
+  ]
+}}
+
+Rules:
+- Only include categories that have at least 2 high-quality items.
+- 3-6 items per category. No duplicates, no broken-looking URLs, no spam aggregators.
+- Prefer authoritative primary sources over content farms.
+- For books, use a clear publisher/author page or "search:" entry (e.g. "https://www.google.com/search?q=Designing+Data+Intensive+Applications+book").
+- For papers, use arxiv.org / acm.org / actual conference URLs when possible.
+- "kind" must be one of: docs, article, course, book, paper, tool.
+- Output ONLY raw JSON.
+"""
 
 
 def make_chat(session_id: str, system: str, provider: str = "anthropic", model: str = "claude-sonnet-4-6") -> LlmChat:
@@ -232,6 +274,74 @@ async def search_youtube(queries: List[str], per_query: int = 2) -> List[dict]:
     return await asyncio.to_thread(run)
 
 
+async def search_web(queries: List[str], per_query: int = 4) -> List[dict]:
+    """DuckDuckGo text search (no API key). Aggregates results across queries."""
+    from ddgs import DDGS
+    # Silence noisy info-level engine errors from ddgs internals
+    logging.getLogger("ddgs").setLevel(logging.ERROR)
+
+    def run():
+        results = []
+        seen_urls = set()
+        try:
+            with DDGS(timeout=10) as d:
+                for q in queries[:5]:
+                    try:
+                        for r in d.text(q, max_results=per_query, region="wt-wt", safesearch="moderate", backend="auto"):
+                            url = r.get("href") or r.get("url")
+                            if not url or url in seen_urls:
+                                continue
+                            seen_urls.add(url)
+                            results.append({
+                                "title": (r.get("title") or "").strip(),
+                                "url": url,
+                                "snippet": (r.get("body") or "").strip()[:240],
+                                "query": q,
+                            })
+                    except Exception as e:
+                        log.warning(f"ddg search '{q}' failed: {e}")
+        except Exception as e:
+            log.warning(f"ddg session failed: {e}")
+        return results
+    return await asyncio.to_thread(run)
+
+
+async def generate_resources(name: str, level: str, search_queries: List[str]) -> dict:
+    """Curate web search results into a categorized resource library via Claude."""
+    if not search_queries:
+        search_queries = [f"{name} tutorial", f"{name} documentation", f"{name} explained"]
+    raw = await search_web(search_queries, per_query=4)
+    if not raw:
+        return {"categories": []}
+    lines = []
+    for i, r in enumerate(raw[:48]):
+        lines.append(f"{i+1}. {r['title']} — {r['url']}\n   {r['snippet']}")
+    block = "\n".join(lines)
+    try:
+        chat = make_chat(
+            f"resources-{uuid.uuid4()}",
+            "You are an expert research librarian. Always return strictly valid JSON.",
+        )
+        reply = await chat.send_message(UserMessage(
+            text=RESOURCES_PROMPT.format(name=name, level=level, search_results=block)
+        ))
+        data = extract_json(reply)
+        if "categories" not in data:
+            data = {"categories": []}
+        return data
+    except Exception as e:
+        log.warning(f"resources gen failed: {e}")
+        return {
+            "categories": [{
+                "name": "Web results",
+                "items": [
+                    {"title": r["title"], "url": r["url"], "description": r["snippet"], "kind": "article"}
+                    for r in raw[:12]
+                ],
+            }]
+        }
+
+
 # ----------------------------- Routes: Auth --------------------------
 
 @api.get("/")
@@ -278,60 +388,91 @@ async def me(user: dict = Depends(get_current_user)):
 
 # ----------------------------- Routes: Concepts ----------------------
 
+async def _run_concept_generation(concept_id: str, user_id: str, name: str, level: str):
+    """Background task — populates the concept doc as each step finishes."""
+    try:
+        roadmap = await generate_roadmap(name, level)
+        await db.concepts.update_one(
+            {"id": concept_id, "user_id": user_id},
+            {"$set": {"roadmap": roadmap, "stage": "expanding"}},
+        )
+
+        img_prompt = roadmap.get("image_prompt") or f"Schematic blueprint illustration of {name}"
+        queries = roadmap.get("video_queries") or [f"{name} tutorial", f"{name} explained"]
+        web_queries = roadmap.get("search_queries") or [f"{name} guide", f"{name} introduction", f"{name} reference"]
+
+        guide_task = asyncio.create_task(generate_study_guide(name, level))
+        image_task = asyncio.create_task(generate_concept_image(img_prompt))
+        video_task = asyncio.create_task(search_youtube(queries))
+        resources_task = asyncio.create_task(generate_resources(name, level, web_queries))
+
+        study_guide, image_data_url, videos, resources = await asyncio.gather(
+            guide_task, image_task, video_task, resources_task
+        )
+
+        await db.concepts.update_one(
+            {"id": concept_id, "user_id": user_id},
+            {"$set": {
+                "study_guide": study_guide,
+                "image": image_data_url,
+                "videos": videos,
+                "resources": resources,
+                "status": "ready",
+                "stage": "done",
+                "ready_at": datetime.now(timezone.utc).isoformat(),
+            }},
+        )
+        log.info(f"Concept '{name}' ({concept_id}) ready.")
+    except Exception as e:
+        log.exception(f"concept generation failed for {concept_id}")
+        await db.concepts.update_one(
+            {"id": concept_id, "user_id": user_id},
+            {"$set": {"status": "failed", "error": str(e)[:240]}},
+        )
+
+
 @api.post("/concepts/generate")
 async def generate_concept(body: GenerateIn, user: dict = Depends(get_current_user)):
     name = body.name.strip()
     level = body.level
-    log.info(f"Generating concept '{name}' for {user['email']} ({level})")
-
-    # Run roadmap first (we need its prompts/queries to feed image + videos)
-    try:
-        roadmap = await generate_roadmap(name, level)
-    except Exception as e:
-        log.exception("roadmap failed")
-        raise HTTPException(status_code=502, detail=f"Roadmap generation failed: {e}")
-
-    # Run study guide, image, videos in parallel
-    img_prompt = roadmap.get("image_prompt") or f"Schematic blueprint illustration of {name}"
-    queries = roadmap.get("video_queries") or [f"{name} tutorial", f"{name} explained"]
-
-    guide_task = asyncio.create_task(generate_study_guide(name, level))
-    image_task = asyncio.create_task(generate_concept_image(img_prompt))
-    video_task = asyncio.create_task(search_youtube(queries))
-
-    study_guide, image_data_url, videos = await asyncio.gather(guide_task, image_task, video_task)
+    log.info(f"Queuing concept '{name}' for {user['email']} ({level})")
 
     concept_id = str(uuid.uuid4())
     now = datetime.now(timezone.utc).isoformat()
-    doc = {
+    initial = {
         "id": concept_id,
         "user_id": user["id"],
         "name": name,
         "level": level,
-        "roadmap": roadmap,
-        "study_guide": study_guide,
-        "image": image_data_url,
-        "videos": videos,
+        "status": "generating",
+        "stage": "roadmap",
+        "roadmap": None,
+        "study_guide": None,
+        "image": None,
+        "videos": [],
+        "resources": None,
         "progress": [],
         "created_at": now,
     }
-    await db.concepts.insert_one(doc)
-    doc.pop("_id", None)
-    return doc
+    await db.concepts.insert_one(initial.copy())
+    # Kick off background task
+    asyncio.create_task(_run_concept_generation(concept_id, user["id"], name, level))
+    return {"id": concept_id, "status": "generating", "stage": "roadmap"}
 
 @api.get("/concepts")
 async def list_concepts(user: dict = Depends(get_current_user)):
     cursor = db.concepts.find(
         {"user_id": user["id"]},
-        {"_id": 0, "study_guide": 0, "videos": 0, "image": 0,
+        {"_id": 0, "study_guide": 0, "videos": 0, "image": 0, "resources": 0,
          "roadmap.summary": 0, "roadmap.prerequisites": 0, "roadmap.study_guide_outline": 0,
-         "roadmap.video_queries": 0, "roadmap.image_prompt": 0},
+         "roadmap.video_queries": 0, "roadmap.search_queries": 0, "roadmap.image_prompt": 0},
     ).sort("created_at", -1)
     items = await cursor.to_list(200)
     for it in items:
         milestones = (it.get("roadmap") or {}).get("milestones") or []
         it["milestone_count"] = len(milestones)
         it["progress"] = it.get("progress") or []
+        it.setdefault("status", "ready")
         it.pop("roadmap", None)
     return items
 

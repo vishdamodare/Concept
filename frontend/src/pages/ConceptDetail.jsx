@@ -5,12 +5,15 @@ import { toast } from "sonner";
 import Markdown from "../components/Markdown";
 import {
   MapTrifold, GraduationCap, FilmReel, ChatTeardropDots, ImageSquare,
-  PaperPlaneTilt, ArrowLeft, Clock, CircleNotch, CheckSquare, Square
+  PaperPlaneTilt, ArrowLeft, Clock, CircleNotch, CheckSquare, Square,
+  BookOpen, ArrowSquareOut, Question, Lightning, FileText, Books, Code,
+  GraduationCap as CourseIcon, ArticleMedium
 } from "@phosphor-icons/react";
 
 const TABS = [
   { id: "roadmap", label: "Roadmap", icon: MapTrifold },
   { id: "guide", label: "Study Guide", icon: GraduationCap },
+  { id: "resources", label: "Resources", icon: BookOpen },
   { id: "videos", label: "Videos", icon: FilmReel },
   { id: "image", label: "Image", icon: ImageSquare },
   { id: "tutor", label: "Tutor", icon: ChatTeardropDots },
@@ -23,10 +26,29 @@ export default function ConceptDetail() {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    apiClient.get(`/concepts/${id}`)
-      .then((r) => setConcept(r.data))
-      .catch((e) => toast.error(formatErr(e)))
-      .finally(() => setLoading(false));
+    let cancelled = false;
+    let timer = null;
+
+    const tick = async () => {
+      try {
+        const r = await apiClient.get(`/concepts/${id}`);
+        if (cancelled) return;
+        setConcept(r.data);
+        setLoading(false);
+        if (r.data?.status === "generating") {
+          timer = setTimeout(tick, 3500);
+        }
+      } catch (e) {
+        if (cancelled) return;
+        toast.error(formatErr(e));
+        setLoading(false);
+      }
+    };
+    tick();
+    return () => {
+      cancelled = true;
+      if (timer) clearTimeout(timer);
+    };
   }, [id]);
 
   const toggleMilestone = async (index, completed) => {
@@ -56,6 +78,25 @@ export default function ConceptDetail() {
         <div className="border border-dashed border-black p-12 text-center">
           <div className="font-display text-2xl font-bold">Not found</div>
           <Link to="/app" className="brut-btn mt-4 inline-flex">Back to dashboard</Link>
+        </div>
+      </div>
+    );
+  }
+
+  if (concept && concept.status === "generating") {
+    return <GeneratingView concept={concept} />;
+  }
+  if (concept && concept.status === "failed") {
+    return (
+      <div className="mx-auto max-w-3xl px-6 py-16" data-testid="generation-failed">
+        <Link to="/app" className="inline-flex items-center gap-2 font-mono text-xs uppercase tracking-widest text-zinc-600 hover:text-black mb-6">
+          <ArrowLeft size={14} weight="bold" /> back to dashboard
+        </Link>
+        <div className="brut-card p-8">
+          <div className="label-tag mb-2 !text-red-500">// GENERATION FAILED</div>
+          <h1 className="font-display text-3xl font-black tracking-tighter">{concept.name}</h1>
+          <p className="mt-3 font-mono text-sm text-zinc-700">{concept.error || "Something went wrong while forging this concept."}</p>
+          <Link to="/app" className="brut-btn mt-6 inline-flex">Try another</Link>
         </div>
       </div>
     );
@@ -95,6 +136,7 @@ export default function ConceptDetail() {
       <section className="mt-8">
         {tab === "roadmap" && <RoadmapTab concept={concept} onToggle={toggleMilestone} />}
         {tab === "guide" && <GuideTab concept={concept} />}
+        {tab === "resources" && <ResourcesTab concept={concept} />}
         {tab === "videos" && <VideosTab concept={concept} />}
         {tab === "image" && <ImageTab concept={concept} />}
         {tab === "tutor" && <TutorTab concept={concept} />}
@@ -181,6 +223,29 @@ function RoadmapTab({ concept, onToggle }) {
                         ))}
                       </div>
                     )}
+
+                    {m.key_questions && m.key_questions.length > 0 && (
+                      <div className="mt-4 border-l-2 border-[#002FA7] pl-3">
+                        <div className="label-tag mb-1 flex items-center gap-1">
+                          <Question size={12} weight="bold" /> KEY QUESTIONS
+                        </div>
+                        <ul className="font-mono text-sm space-y-1 text-zinc-700">
+                          {m.key_questions.map((q, k) => (
+                            <li key={k}>· {q}</li>
+                          ))}
+                        </ul>
+                      </div>
+                    )}
+
+                    {m.exercise && (
+                      <div className="mt-4 bg-zinc-50 border border-zinc-200 p-3">
+                        <div className="label-tag mb-1 flex items-center gap-1">
+                          <Lightning size={12} weight="fill" /> EXERCISE
+                        </div>
+                        <p className="font-mono text-sm leading-relaxed text-zinc-800">{m.exercise}</p>
+                      </div>
+                    )}
+
                     {m.estimate && (
                       <div className="mt-3 inline-flex items-center gap-1 font-mono text-xs text-zinc-500">
                         <Clock size={12} weight="bold" /> {m.estimate}
@@ -205,6 +270,80 @@ function GuideTab({ concept }) {
       </div>
     </div>
   );
+}
+
+const KIND_ICON = {
+  docs: FileText,
+  article: ArticleMedium,
+  course: CourseIcon,
+  book: Books,
+  paper: FileText,
+  tool: Code,
+};
+
+function ResourcesTab({ concept }) {
+  const categories = concept.resources?.categories || [];
+  if (categories.length === 0) {
+    return (
+      <div data-testid="resources-tab" className="font-mono text-sm text-zinc-600">
+        No web resources were collected for this concept.
+      </div>
+    );
+  }
+  const totalCount = categories.reduce((acc, c) => acc + (c.items?.length || 0), 0);
+
+  return (
+    <div data-testid="resources-tab">
+      <div className="mb-6 flex items-baseline gap-3">
+        <div className="label-tag">// HAND-PICKED FROM THE WEB</div>
+        <span className="font-mono text-xs text-zinc-500">{totalCount} resources across {categories.length} categories</span>
+      </div>
+
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        {categories.map((cat, ci) => (
+          <div data-testid={`resource-category-${ci}`} key={ci} className="brut-card p-5">
+            <div className="border-b border-black pb-3 mb-3 flex items-baseline justify-between">
+              <h3 className="font-display text-lg font-bold tracking-tight">{cat.name}</h3>
+              <span className="font-mono text-[10px] text-zinc-500">{cat.items?.length || 0}</span>
+            </div>
+            <ul className="space-y-3">
+              {(cat.items || []).map((it, ii) => {
+                const Icon = KIND_ICON[it.kind] || ArticleMedium;
+                return (
+                  <li key={ii} data-testid={`resource-item-${ci}-${ii}`}>
+                    <a
+                      href={it.url}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="group flex gap-3 items-start p-2 -mx-2 border border-transparent hover:border-black hover:bg-zinc-50 transition"
+                    >
+                      <Icon size={18} weight="duotone" className="text-[#002FA7] shrink-0 mt-0.5" />
+                      <div className="flex-1 min-w-0">
+                        <div className="font-display font-bold text-sm leading-snug group-hover:text-[#002FA7] flex items-center gap-1">
+                          <span className="truncate">{it.title}</span>
+                          <ArrowSquareOut size={12} weight="bold" className="opacity-0 group-hover:opacity-100 shrink-0" />
+                        </div>
+                        {it.description && (
+                          <p className="mt-1 font-mono text-xs text-zinc-600 leading-relaxed line-clamp-2">
+                            {it.description}
+                          </p>
+                        )}
+                        <div className="mt-1 font-mono text-[10px] text-zinc-400 truncate">{safeHost(it.url)}</div>
+                      </div>
+                    </a>
+                  </li>
+                );
+              })}
+            </ul>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function safeHost(url) {
+  try { return new URL(url).hostname.replace(/^www\./, ""); } catch { return url; }
 }
 
 function VideosTab({ concept }) {
@@ -368,3 +507,55 @@ function TutorTab({ concept }) {
     </div>
   );
 }
+
+const STAGE_FLOW = [
+  { id: "roadmap", label: "Roadmap: structuring milestones with Claude" },
+  { id: "expanding", label: "Study guide, image, videos, web resources" },
+  { id: "done", label: "Stitching it all together" },
+];
+
+function GeneratingView({ concept }) {
+  const idx = Math.max(0, STAGE_FLOW.findIndex((s) => s.id === concept.stage));
+  return (
+    <div data-testid="generating-view" className="mx-auto max-w-3xl px-6 py-16">
+      <Link to="/app" className="inline-flex items-center gap-2 font-mono text-xs uppercase tracking-widest text-zinc-600 hover:text-black mb-6">
+        <ArrowLeft size={14} weight="bold" /> back to dashboard
+      </Link>
+      <div className="brut-card p-10 fade-up">
+        <div className="label-tag mb-2">// FORGING · LEVEL: {concept.level}</div>
+        <h1 className="font-display text-4xl md:text-5xl font-black tracking-tighter leading-tight">
+          {concept.name}
+        </h1>
+        <p className="mt-4 font-mono text-sm text-zinc-600">
+          We&apos;re building your concept package. Stay here — the page will update live.
+        </p>
+
+        <div className="mt-8 space-y-3 font-mono text-sm">
+          {STAGE_FLOW.map((s, i) => {
+            const state = i < idx ? "done" : i === idx ? "active" : "pending";
+            return (
+              <div
+                key={s.id}
+                data-testid={`stage-${s.id}`}
+                className={`flex items-center gap-3 p-3 border ${
+                  state === "active" ? "border-black bg-zinc-50" :
+                  state === "done"   ? "border-zinc-200 text-zinc-400" :
+                                       "border-zinc-200 text-zinc-300"
+                }`}
+              >
+                <span className={`w-6 inline-block ${state === "active" ? "text-[#002FA7] font-bold" : ""}`}>
+                  {state === "done" ? "✓" : state === "active" ? "▸" : "·"}
+                </span>
+                <span className="flex-1">{s.label}</span>
+                {state === "active" && <span className="spinner-dots"><span /><span /><span /></span>}
+              </div>
+            );
+          })}
+        </div>
+
+        <div className="mt-6 font-mono text-xs text-zinc-500 term-loader">working</div>
+      </div>
+    </div>
+  );
+}
+

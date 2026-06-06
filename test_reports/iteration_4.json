@@ -1,0 +1,31 @@
+{
+  "summary": "Iteration 4 tests the async concept generation + enriched roadmap + new Resources tab. Backend: 23/23 pytest passed in 109s. Updated test_generate_concept to the new async pattern (POST returns in <2s with status='generating'+stage='roadmap', then GET polls every 4s until status='ready'). Validated enriched contract: 7-9 milestones each with title/description/topics/key_questions/exercise/estimate, study_guide >= 1100 chars, resources.categories 3-6 entries with each item {title, http(s) url, description, kind in {docs,article,course,book,paper,tool}}. Frontend: logged in as learner@conceptforge.app, opened an existing 'Bash shell scripting' concept — Roadmap tab shows 9 milestones with KEY QUESTIONS and EXERCISE blocks; Resources tab renders 5 categories / 21 items, all links http(s) with target='_blank'. Then forged a new 'Quicksort algorithm' beginner concept — POST is async (<2s); GeneratingView renders immediately with stage-roadmap/stage-expanding/stage-done; polling observed stage→EXPANDING at ~60s, status→ready at ~110s; newly-ready concept has 9 enriched milestones and 5 resource categories (22 items). No JS console errors, no overlays, no failed network calls.",
+  "backend_issues": { "critical": [], "minor": [] },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_conceptforge.py",
+    "/app/test_reports/pytest/pytest_results.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "Background task pattern is correct: POST returns {id,status,stage} immediately and asyncio.create_task fires _run_concept_generation which writes incremental state to Mongo (roadmap first → stage=expanding, then parallel gather of guide/image/videos/resources → status=ready). On failure the doc is marked status='failed' with error message, which the frontend handles via the 'generation-failed' branch.",
+    "search_web uses ddgs DDGS().text(..., backend='auto') — note that the legacy package name was 'duckduckgo-search'; the newer 'ddgs' library is the correct current import. Reasonable timeout (10s) and per-query cap (5 queries × 4 results = 20 raw) are sensible.",
+    "generate_resources has a graceful fallback: if Claude curation fails, it returns the raw web results under a single 'Web results' category. Good resilience.",
+    "Minor: _run_concept_generation uses asyncio.create_task without storing the task reference; this is intentional fire-and-forget but means stalled/zombie tasks (e.g. if the worker is restarted mid-run) leave concepts permanently in 'generating' state with no watchdog. Consider a startup sweeper that marks status='failed' on concepts older than N minutes still in 'generating'. Not blocking — out of scope for this iteration.",
+    "ConceptDetail polling interval is 3.5s and stops when status !== 'generating'; correct. GeneratingView stage indicator highlights the active stage via 'border-black' which is what the test asserts.",
+    "Resources tab links use rel='noopener noreferrer' and target='_blank' — verified safe.",
+    "Roadmap milestone card shows KEY QUESTIONS as a bulleted list and EXERCISE as a labeled paragraph — both render correctly and only appear when the milestone payload has them, so legacy concepts without these fields won't crash."
+  ],
+  "updated_files": ["/app/backend/tests/test_conceptforge.py"],
+  "success_rate": { "backend": "100% (23/23)", "frontend": "100% (all acceptance checks: login, existing concept enriched roadmap+resources, forge async flow, GeneratingView with 3 stages, polling to ready, new concept fully enriched)" },
+  "test_credentials": "learner@conceptforge.app / learner123 ; admin@conceptforge.app / admin123 (also test_a_<runid>@conceptforge.app are created per run by pytest)",
+  "seed_data_creation": "Pytest creates two ephemeral users per run (test_a_<runid>, test_b_<runid>) and one 'Python lists' beginner concept that is deleted at end of the run. Frontend test forged one 'Quicksort algorithm' beginner concept for learner@conceptforge.app and left it in the library (not cleaned up — main agent can ignore or delete).",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Async generation pattern is fully working: POST /api/concepts/generate is non-blocking, returns within 1-2s; GET /api/concepts/{id} progressively reveals fields and toggles status from 'generating' (stage=roadmap → expanding → done) to 'ready' in ~100-130s total. Frontend ConceptDetail polls every 3.5s. Selectors for new features: tab-resources, resources-tab, resource-category-<i>, resource-item-<ci>-<ii>, generating-view, stage-roadmap, stage-expanding, stage-done. The roadmap-tab now contains 'KEY QUESTIONS' and 'EXERCISE' text blocks under each milestone description. Backend tests live in /app/backend/tests/test_conceptforge.py and complete in ~110s.",
+  "rca of the issue": "No issues found. All acceptance criteria for iteration 4 pass on first run."
+}
