@@ -1,0 +1,27 @@
+{
+  "summary": "Re-tested ConceptDetail milestone progress tracking after toggleMilestone was added (lines 32-46). All 5 acceptance checks pass end-to-end. ConceptDetail page mounts cleanly with no runtime error overlay, no console/page errors. Roadmap tab renders progress-card and 7 milestone-toggle-<i> buttons. Clicking milestone-toggle-0 updated progress 0%→14%; clicking milestone-toggle-1 updated 14%→29% (UI updates immediately, optimistic). Page reload still shows 29% (PATCH /api/concepts/{id}/progress persistence verified). Dashboard concept card for 'Python lists' shows '2 / 7' and a 29% progress bar — saved state reflected. Toggle-OFF path also verified (29%→14% after unchecking milestone-0).",
+  "backend_issues": { "critical": [], "minor": [] },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_conceptforge.py",
+    "/app/test_reports/pytest/pytest_results.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "Fix is correct and minimal: toggleMilestone uses optimistic update (set with Array.from(Set).sort), PATCHes /concepts/{id}/progress, replaces with server response, reverts on error with toast. Behavior matches backend contract verified in iteration 2.",
+    "Consider adding an ErrorBoundary around route content in App.jsx so future undefined-reference style regressions surface gracefully instead of blanking the whole page. This was the same suggestion in iteration 2 and remains open.",
+    "index.html still loads https://assets.emergent.sh/scripts/emergent-main.js — if a fully Emergent-free build is desired, this script tag should also be removed (badge is already gone). Not blocking."
+  ],
+  "updated_files": [],
+  "success_rate": { "backend": "100% (23/23 from iteration 2, not re-run)", "frontend": "100% (5/5 acceptance checks)" },
+  "test_credentials": "admin@conceptforge.app / admin123 — used existing 'Python lists' beginner concept (id 00fdb220-b6d9-4ae2-b333-e4e29ecd5ff4) already present in admin library from prior iteration.",
+  "seed_data_creation": "None. Reused existing concept. After this run the concept's progress field contains [1] (only milestone index 1 left toggled on, ~14%). Main agent may want to reset to [] if a clean state is desired.",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Milestone progress feature is fully working end-to-end. All UI selectors (data-testid: concept-detail-page, roadmap-tab, progress-card, progress-percent, milestone-toggle-<i>, milestone-<i>, back-to-dashboard, concept-card-<id>) are present and stable. For future progress-related testing, login as admin, open the seeded 'Python lists' concept on the dashboard, then click any milestone-toggle-<i> and observe progress-percent + dashboard card sync.",
+  "rca of the issue": "Fix verified: toggleMilestone function now properly defined inside ConceptDetail() at lines 32-46 before the loading guard, captured in JSX closure on line 96, and correctly passed as onToggle to RoadmapTab. The previous ReferenceError no longer reproduces."
+}

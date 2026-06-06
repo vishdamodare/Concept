@@ -29,6 +29,22 @@ export default function ConceptDetail() {
       .finally(() => setLoading(false));
   }, [id]);
 
+  const toggleMilestone = async (index, completed) => {
+    if (!concept) return;
+    const prev = concept.progress || [];
+    const next = new Set(prev);
+    if (completed) next.add(index); else next.delete(index);
+    const optimistic = Array.from(next).sort((a, b) => a - b);
+    setConcept({ ...concept, progress: optimistic });
+    try {
+      const r = await apiClient.patch(`/concepts/${id}/progress`, { index, completed });
+      setConcept((c) => c ? { ...c, progress: r.data.progress } : c);
+    } catch (e) {
+      toast.error(formatErr(e));
+      setConcept((c) => c ? { ...c, progress: prev } : c);
+    }
+  };
+
   if (loading) {
     return (
       <div className="mx-auto max-w-7xl px-6 py-12 font-mono text-sm term-loader">Loading concept</div>
