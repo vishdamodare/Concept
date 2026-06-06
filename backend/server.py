@@ -391,23 +391,66 @@ async def me(user: dict = Depends(get_current_user)):
 # ----------------------------- Routes: Concepts ----------------------
 
 async def _run_concept_generation(concept_id: str, user_id: str, name: str, level: str):
-    """Background task — populates the concept doc as each step finishes."""
+    """Background task — runs every independent step in parallel from t=0.
+
+    Pipeline:
+      t=0  : roadmap, study_guide, prelim youtube, prelim web search (all parallel)
+      t≈60s: once roadmap arrives, kick off image (uses image_prompt) + resources (uses web results)
+    """
     try:
-        roadmap = await generate_roadmap(name, level)
+        # Phase 1 — start everything that doesn't need roadmap output
+        prelim_video_queries = [f"{name} tutorial", f"{name} explained", f"{name} crash course"]
+        prelim_web_queries = [f"{name} guide", f"{name} documentation", f"{name} introduction", f"{name} tutorial"]
+
+        roadmap_task = asyncio.create_task(generate_roadmap(name, level))
+        guide_task = asyncio.create_task(generate_study_guide(name, level))
+        video_task = asyncio.create_task(search_youtube(prelim_video_queries))
+        web_task = asyncio.create_task(search_web(prelim_web_queries, per_query=4))
+
+        # Wait for roadmap; once it lands we can start image + resources curation
+        roadmap = await roadmap_task
         await db.concepts.update_one(
             {"id": concept_id, "user_id": user_id},
             {"$set": {"roadmap": roadmap, "stage": "expanding"}},
         )
 
         img_prompt = roadmap.get("image_prompt") or f"Schematic blueprint illustration of {name}"
-        queries = roadmap.get("video_queries") or [f"{name} tutorial", f"{name} explained"]
-        web_queries = roadmap.get("search_queries") or [f"{name} guide", f"{name} introduction", f"{name} reference"]
 
-        guide_task = asyncio.create_task(generate_study_guide(name, level))
+        async def _curate_resources_from(raw_results):
+            """Use Claude to categorize the prelim web results — roadmap-aware."""
+            if not raw_results:
+                return {"categories": []}
+            lines = [f"{i+1}. {r['title']} — {r['url']}\n   {r['snippet']}" for i, r in enumerate(raw_results[:48])]
+            try:
+                chat = make_chat(
+                    f"resources-{uuid.uuid4()}",
+                    "You are an expert research librarian. Always return strictly valid JSON.",
+                )
+                reply = await chat.send_message(UserMessage(
+                    text=RESOURCES_PROMPT.format(name=name, level=level, search_results="\n".join(lines))
+                ))
+                data = extract_json(reply)
+                if "categories" not in data:
+                    data = {"categories": []}
+                return data
+            except Exception as e:
+                log.warning(f"resources gen failed: {e}")
+                return {
+                    "categories": [{
+                        "name": "Web results",
+                        "items": [
+                            {"title": r["title"], "url": r["url"], "description": r["snippet"], "kind": "article"}
+                            for r in raw_results[:12]
+                        ],
+                    }]
+                }
+
         image_task = asyncio.create_task(generate_concept_image(img_prompt))
-        video_task = asyncio.create_task(search_youtube(queries))
-        resources_task = asyncio.create_task(generate_resources(name, level, web_queries))
+        # Wait for web search to finish, then curate. guide + videos already running.
+        web_results = await web_task
+        resources_task = asyncio.create_task(_curate_resources_from(web_results))
 
+        # Now wait for everything to finish
         study_guide, image_data_url, videos, resources = await asyncio.gather(
             guide_task, image_task, video_task, resources_task
         )
