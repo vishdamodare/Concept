@@ -30,7 +30,7 @@ export const AuthProvider = ({ children }) => {
   };
 
   const logout = async () => {
-    try { await apiClient.post("/auth/logout"); } catch (e) {}
+    try { await apiClient.post("/auth/logout"); } catch (e) { /* ignore */ }
     localStorage.removeItem("cf_token");
     setUser(false);
   };

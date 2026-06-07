@@ -720,7 +720,7 @@ async def post_chat(concept_id: str, body: ChatIn, user: dict = Depends(get_curr
         f"You are a patient, expert tutor helping a {concept['level']} learner master '{concept['name']}'. "
         f"Adapt your explanations to their level. Be concise but thorough. "
         f"Use analogies, examples, and check their understanding. Reference the roadmap milestones when relevant: "
-        f"{[m.get('title') for m in concept['roadmap'].get('milestones', [])]}"
+        f"{[m.get('title') for m in (concept.get('roadmap') or {}).get('milestones', [])]}"
     )
 
     session_id = f"tutor-{concept_id}"

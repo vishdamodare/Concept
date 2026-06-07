@@ -7,8 +7,10 @@ import {
   MapTrifold, GraduationCap, FilmReel, ChatTeardropDots, ImageSquare,
   PaperPlaneTilt, ArrowLeft, Clock, CircleNotch, CheckSquare, Square,
   BookOpen, ArrowSquareOut, Question, Lightning, FileText, Books, Code,
-  GraduationCap as CourseIcon, ArticleMedium, DownloadSimple, FilePdf, FileMd
+  ArticleMedium, DownloadSimple, FilePdf, FileMd
 } from "@phosphor-icons/react";
+
+const CourseIcon = GraduationCap;
 
 const TABS = [
   { id: "roadmap", label: "Roadmap", icon: MapTrifold },

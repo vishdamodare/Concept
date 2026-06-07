@@ -33,6 +33,7 @@
     "@radix-ui/react-toggle-group": "1.1.7",
     "@radix-ui/react-tooltip": "1.2.4",
     "@tanstack/react-query": "5.56.2",
+    "ajv": "^8.20.0",
     "axios": "1.8.4",
     "class-variance-authority": "0.7.1",
     "clsx": "2.1.1",
@@ -64,7 +65,10 @@
   "scripts": {
     "start": "craco start",
     "build": "craco build",
-    "test": "craco test"
+    "test": "craco test",
+    "lint": "eslint src --ext .js,.jsx",
+    "format": "prettier --write \"src/**/*.{js,jsx,css}\"",
+    "clean": "rm -rf build"
   },
   "browserslist": {
     "production": [

@@ -1,6 +1,6 @@
 # Concept - AI-Powered Learning Platform
 
-A modern, full-stack educational platform powered by AI tutoring capabilities. Built with React, TypeScript, and Node.js following professional software development practices.
+A modern, full-stack educational platform powered by AI tutoring capabilities. Built with React and Python (FastAPI) following professional software development practices.
 
 ## Project Overview
 
@@ -33,22 +33,22 @@ Complete documentation is available in the `/docs` directory:
 ## Technology Stack
 
 **Frontend:**
-- React 18+
-- TypeScript
+- React 19 (JavaScript / JSX)
 - Tailwind CSS
 - Shadcn/ui Components
+- Phosphor Icons
 
 **Backend:**
-- Node.js
-- Express.js
-- PostgreSQL
-- Redis
+- Python 3.13
+- FastAPI (Async routing)
+- MongoDB (via Motor driver)
+- yt-dlp & ddgs (Media & search curation)
+- WeasyPrint (PDF rendering)
 
 **Tools:**
-- Jest (Testing)
 - ESLint (Linting)
 - Prettier (Formatting)
-- Docker (Deployment)
+- Pytest (Testing)
 
 ## Core Commands
 
@@ -79,29 +79,29 @@ npm start               # Start production server
 ```
 Frontend (React SPA)
     ↓
-API Gateway (Express.js)
+API Gateway (FastAPI)
     ↓
-├── Auth Service
-├── Concept Service
-├── Tutor Service (AI)
-└── User Service
+├── Auth API
+├── Concept API (LLM Generation)
+├── Tutor API (Chatbot)
+└── User API
     ↓
-Database (PostgreSQL) + Cache (Redis)
+Database (MongoDB)
 ```
 
 Detailed architecture at [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)
 
 ## API Endpoints
 
-Base URL: `http://localhost:5000/api/v1`
+Base URL: `http://localhost:5000/api`
 
 Key endpoints:
-- `POST /auth/login` - User authentication
-- `GET /concepts` - List concepts
-- `POST /tutor/chat` - AI tutoring chat
-- `GET /users/me` - Current user profile
-
-Full API documentation: [docs/API.md](docs/API.md)
+- `POST /api/auth/register` - Register a new user
+- `POST /api/auth/login` - User authentication
+- `GET /api/concepts` - List concepts
+- `POST /api/concepts/generate` - Forge a concept package
+- `POST /api/concepts/{id}/chat` - AI tutoring chat
+- `GET /api/concepts/{id}/export` - Export concept (Markdown / PDF)
 
 ## Project Structure
 

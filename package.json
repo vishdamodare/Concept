@@ -6,27 +6,30 @@
   "type": "module",
   "main": "index.js",
   "scripts": {
-    "dev": "npm run dev --workspace=frontend && npm run dev --workspace=backend",
-    "dev:frontend": "npm run dev --workspace=frontend",
-    "dev:backend": "npm run dev --workspace=backend",
-    "build": "npm run build --workspace=frontend && npm run build --workspace=backend",
+    "dev": "concurrently \"npm run start --workspace=frontend\" \"npm run dev:backend\"",
+    "dev:frontend": "npm run start --workspace=frontend",
+    "dev:backend": "cd backend && python3 -m uvicorn server:app --host 127.0.0.1 --port 5000 --reload",
+    "build": "npm run build --workspace=frontend",
     "build:frontend": "npm run build --workspace=frontend",
-    "build:backend": "npm run build --workspace=backend",
-    "start": "npm start --workspace=backend",
-    "test": "npm run test --workspace=frontend && npm run test --workspace=backend",
-    "test:frontend": "npm run test --workspace=frontend",
-    "test:backend": "npm run test --workspace=backend",
-    "test:coverage": "npm run test:coverage --workspace=frontend && npm run test:coverage --workspace=backend",
-    "test:e2e": "npm run test:e2e --workspace=tests",
-    "lint": "npm run lint --workspace=frontend && npm run lint --workspace=backend",
-    "format": "npm run format --workspace=frontend && npm run format --workspace=backend",
-    "type-check": "npm run type-check --workspace=frontend && npm run type-check --workspace=backend",
-    "check": "npm run lint && npm run type-check && npm run test",
-    "clean": "npm run clean --workspace=frontend && npm run clean --workspace=backend"
+    "build:backend": "echo 'No build step for backend'",
+    "start": "cd backend && python3 -m uvicorn server:app --host 127.0.0.1 --port 5000",
+    "test": "npm run test:frontend && npm run test:backend",
+    "test:frontend": "CI=true npm run test --workspace=frontend",
+    "test:backend": "cd backend && python3 -m pytest tests/",
+    "test:coverage": "echo 'No coverage check configured'",
+    "test:e2e": "echo 'No E2E tests configured'",
+    "lint": "npm run lint:frontend && npm run lint:backend",
+    "lint:frontend": "npm run lint --workspace=frontend",
+    "lint:backend": "cd backend && python3 -m flake8 server.py",
+    "format": "npm run format:frontend && npm run format:backend",
+    "format:frontend": "npm run format --workspace=frontend",
+    "format:backend": "cd backend && python3 -m black server.py",
+    "type-check": "echo 'No TypeScript check needed (pure JS)'",
+    "check": "npm run lint && npm run test",
+    "clean": "npm run clean --workspace=frontend"
   },
   "workspaces": [
-    "frontend",
-    "backend"
+    "frontend"
   ],
   "keywords": [
     "AI",
@@ -42,6 +45,10 @@
     "npm": ">=9.0.0"
   },
   "devDependencies": {
-    "concurrently": "^8.2.2"
+    "concurrently": "^8.2.2",
+    "prettier": "^3.8.3"
+  },
+  "dependencies": {
+    "ajv": "^8.20.0"
   }
 }
