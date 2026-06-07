@@ -25,19 +25,28 @@ from pydantic import BaseModel, Field, EmailStr, ConfigDict
 from emergentintegrations.llm.chat import LlmChat, UserMessage
 
 # ----------------------------- Setup ---------------------------------
-mongo_url = os.environ['MONGO_URL']
-client = AsyncIOMotorClient(mongo_url)
-db = client[os.environ['DB_NAME']]
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+log = logging.getLogger("conceptforge")
 
-EMERGENT_LLM_KEY = os.environ['EMERGENT_LLM_KEY']
-JWT_SECRET = os.environ['JWT_SECRET']
+mongo_url = os.environ.get('MONGO_URL', 'mongodb://localhost:27017')
+if 'MONGO_URL' not in os.environ:
+    log.warning("MONGO_URL not set – using default localhost. Set this env var for production!")
+
+client = AsyncIOMotorClient(mongo_url)
+db = client[os.environ.get('DB_NAME', 'conceptforge')]
+
+EMERGENT_LLM_KEY = os.environ.get('EMERGENT_LLM_KEY', '')
+if not EMERGENT_LLM_KEY:
+    log.warning("EMERGENT_LLM_KEY not set – LLM features will fail. Set this env var!")
+
+JWT_SECRET = os.environ.get('JWT_SECRET', 'dev-secret-change-me-in-production')
+if 'JWT_SECRET' not in os.environ:
+    log.warning("JWT_SECRET not set – using insecure default. Set this env var for production!")
+
 JWT_ALG = 'HS256'
 
 app = FastAPI(title="ConceptForge API")
 api = APIRouter(prefix="/api")
-
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
-log = logging.getLogger("conceptforge")
 
 # ----------------------------- Auth helpers --------------------------
 
@@ -673,7 +682,11 @@ async def export_concept(
         )
 
     # PDF
-    from weasyprint import HTML
+    try:
+        from weasyprint import HTML
+    except (ImportError, OSError) as e:
+        log.warning(f"weasyprint not available: {e}")
+        raise HTTPException(status_code=501, detail="PDF export is not available on this server. Use markdown export instead.")
     html = _markdown_to_pdf_html(md_text, doc.get("name", "Concept"))
     pdf_bytes = await asyncio.to_thread(lambda: HTML(string=html).write_pdf())
     return Response(
