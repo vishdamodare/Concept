@@ -12,6 +12,7 @@ import base64
 import re
 from datetime import datetime, timezone, timedelta
 from typing import List, Optional, Annotated
+import certifi
 
 import bcrypt
 import jwt
@@ -32,7 +33,11 @@ mongo_url = os.environ.get('MONGO_URL', 'mongodb://localhost:27017')
 if 'MONGO_URL' not in os.environ:
     log.warning("MONGO_URL not set – using default localhost. Set this env var for production!")
 
-client = AsyncIOMotorClient(mongo_url)
+# Use certifi CA bundle for SSL – fixes TLS handshake errors on Python 3.14 / Render
+if 'mongodb+srv' in mongo_url or 'tls=true' in mongo_url.lower() or 'ssl=true' in mongo_url.lower():
+    client = AsyncIOMotorClient(mongo_url, tlsCAFile=certifi.where())
+else:
+    client = AsyncIOMotorClient(mongo_url)
 db = client[os.environ.get('DB_NAME', 'conceptforge')]
 
 EMERGENT_LLM_KEY = os.environ.get('EMERGENT_LLM_KEY', '')
@@ -769,26 +774,29 @@ async def post_chat(concept_id: str, body: ChatIn, user: dict = Depends(get_curr
 
 @app.on_event("startup")
 async def on_startup():
-    await db.users.create_index("email", unique=True)
-    await db.concepts.create_index([("user_id", 1), ("created_at", -1)])
-    await db.chat_messages.create_index([("concept_id", 1), ("created_at", 1)])
+    try:
+        await db.users.create_index("email", unique=True)
+        await db.concepts.create_index([("user_id", 1), ("created_at", -1)])
+        await db.chat_messages.create_index([("concept_id", 1), ("created_at", 1)])
 
-    # Seed admin
-    admin_email = os.environ.get("ADMIN_EMAIL", "admin@conceptforge.app").lower()
-    admin_pw = os.environ.get("ADMIN_PASSWORD", "admin123")
-    existing = await db.users.find_one({"email": admin_email})
-    if not existing:
-        await db.users.insert_one({
-            "id": str(uuid.uuid4()),
-            "email": admin_email,
-            "name": "Admin",
-            "password_hash": hash_password(admin_pw),
-            "role": "admin",
-            "created_at": datetime.now(timezone.utc).isoformat(),
-        })
-        log.info(f"Seeded admin {admin_email}")
-    elif not verify_password(admin_pw, existing["password_hash"]):
-        await db.users.update_one({"email": admin_email}, {"$set": {"password_hash": hash_password(admin_pw)}})
+        # Seed admin
+        admin_email = os.environ.get("ADMIN_EMAIL", "admin@conceptforge.app").lower()
+        admin_pw = os.environ.get("ADMIN_PASSWORD", "admin123")
+        existing = await db.users.find_one({"email": admin_email})
+        if not existing:
+            await db.users.insert_one({
+                "id": str(uuid.uuid4()),
+                "email": admin_email,
+                "name": "Admin",
+                "password_hash": hash_password(admin_pw),
+                "role": "admin",
+                "created_at": datetime.now(timezone.utc).isoformat(),
+            })
+            log.info(f"Seeded admin {admin_email}")
+        elif not verify_password(admin_pw, existing["password_hash"]):
+            await db.users.update_one({"email": admin_email}, {"$set": {"password_hash": hash_password(admin_pw)}})
+    except Exception as e:
+        log.error(f"Startup DB init failed (server will continue): {e}")
 
 @app.on_event("shutdown")
 async def on_shutdown():
