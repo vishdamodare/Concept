@@ -25,9 +25,11 @@ from pydantic import BaseModel, Field, EmailStr, ConfigDict
 
 from emergentintegrations.llm.chat import LlmChat, UserMessage
 
-# ----------------------------- Setup ---------------------------------
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 log = logging.getLogger("conceptforge")
+
+# Keep strong references to running background tasks to prevent garbage collection mid-execution
+active_tasks = set()
 
 mongo_url = os.environ.get('MONGO_URL', 'mongodb://localhost:27017')
 if 'MONGO_URL' not in os.environ:
@@ -514,8 +516,10 @@ async def generate_concept(body: GenerateIn, user: dict = Depends(get_current_us
         "created_at": now,
     }
     await db.concepts.insert_one(initial.copy())
-    # Kick off background task
-    asyncio.create_task(_run_concept_generation(concept_id, user["id"], name, level))
+    # Kick off background task and keep a strong reference to prevent GC deletion
+    gen_task = asyncio.create_task(_run_concept_generation(concept_id, user["id"], name, level))
+    active_tasks.add(gen_task)
+    gen_task.add_done_callback(active_tasks.discard)
     return {"id": concept_id, "status": "generating", "stage": "roadmap"}
 
 @api.get("/concepts")
@@ -741,7 +745,9 @@ async def post_chat(concept_id: str, body: ChatIn, user: dict = Depends(get_curr
         f"{[m.get('title') for m in (concept.get('roadmap') or {}).get('milestones', [])]}"
     )
 
-    session_id = f"tutor-{concept_id}"
+    # Append random string to session_id to make it unique per message.
+    # This keeps proxy calls stateless so we don't get double history duplication (since we pass manual context).
+    session_id = f"tutor-{concept_id}-{uuid.uuid4().hex}"
     chat = make_chat(session_id, system)
 
     # Replay last user-assistant pairs as a single context block to avoid library state issues
@@ -804,10 +810,21 @@ async def on_shutdown():
 
 
 app.include_router(api)
+
+cors_origins_str = os.environ.get('CORS_ORIGINS', '')
+cors_origins = [orig.strip() for orig in cors_origins_str.split(',') if orig.strip()] if cors_origins_str else []
+if not cors_origins:
+    cors_origins = [
+        "http://localhost:3000",
+        "http://localhost:5173",
+        "https://conceptforge.onrender.com",
+        "https://concept-4wnq.onrender.com"
+    ]
+
 app.add_middleware(
     CORSMiddleware,
     allow_credentials=True,
-    allow_origins=os.environ.get('CORS_ORIGINS', '*').split(','),
+    allow_origins=cors_origins,
     allow_methods=["*"],
     allow_headers=["*"],
 )

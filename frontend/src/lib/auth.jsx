@@ -11,7 +11,10 @@ export const AuthProvider = ({ children }) => {
     apiClient
       .get("/auth/me")
       .then((r) => setUser(r.data))
-      .catch(() => setUser(false))
+      .catch(() => {
+        setUser(false);
+        localStorage.removeItem("cf_token");
+      })
       .finally(() => setBootstrapped(true));
   }, []);
 
