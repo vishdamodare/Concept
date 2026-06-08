@@ -2,6 +2,7 @@ import os
 import uuid
 import logging
 from typing import List, Optional, Tuple, Dict, Any
+import httpx
 import litellm
 
 log = logging.getLogger("conceptforge.emergent")
@@ -12,7 +13,7 @@ class UserMessage:
         self.text = text
 
 class LlmChat:
-    """Mock/Replacement for LlmChat routing requests via litellm to the platform LLM proxy."""
+    """Replacement for LlmChat routing requests via direct httpx or litellm to the platform LLM proxy."""
     def __init__(self, api_key: str, session_id: str, system_message: str):
         self.api_key = api_key
         self.session_id = session_id
@@ -31,7 +32,7 @@ class LlmChat:
         return self
 
     def _get_api_setup(self) -> Tuple[str, str]:
-        # Resolve api_base (defaults to the root host, without the /v1 suffix, to allow LiteLLM to append endpoints correctly)
+        # Resolve api_base
         api_base = os.environ.get("LITELLM_API_BASE") or os.environ.get("OPENAI_API_BASE") or "https://api.emergent.sh"
         
         # Resolve model name
@@ -41,6 +42,37 @@ class LlmChat:
         
         return api_base, model_name
 
+    async def _send_direct_proxy_request(self, messages: List[Dict[str, str]]) -> Dict[str, Any]:
+        api_base, _ = self._get_api_setup()
+        
+        # Strip trailing slashes and append the exact OpenAI chat completions path
+        base_url = api_base.rstrip("/")
+        if not base_url.endswith("/v1"):
+            url = f"{base_url}/v1/chat/completions"
+        else:
+            url = f"{base_url}/chat/completions"
+            
+        headers = {
+            "Content-Type": "application/json",
+            "Authorization": f"Bearer {self.api_key}"
+        }
+        
+        # The platform proxy maps direct model names (like claude-sonnet-4-6)
+        data = {
+            "model": self.model,
+            "messages": messages,
+            **self.params
+        }
+        
+        log.info(f"Sending direct HTTP completions request to: {url} (model: {self.model})")
+        
+        async with httpx.AsyncClient() as client:
+            response = await client.post(url, headers=headers, json=data, timeout=120.0)
+            if response.status_code != 200:
+                log.error(f"Proxy request failed with status {response.status_code}: {response.text}")
+                raise Exception(f"Proxy error ({response.status_code}): {response.text}")
+            return response.json()
+
     async def send_message(self, message: UserMessage) -> str:
         api_base, model_name = self._get_api_setup()
         
@@ -49,19 +81,29 @@ class LlmChat:
             {"role": "user", "content": message.text}
         ]
         
-        log.info(f"Sending message to {model_name} via {api_base}")
-        try:
-            response = await litellm.acompletion(
-                model=model_name,
-                messages=messages,
-                api_key=self.api_key,
-                api_base=api_base,
-                **self.params
-            )
-            return response.choices[0].message.content or ""
-        except Exception as e:
-            log.error(f"Error calling completions: {e}")
-            raise
+        # If calling the default platform proxy (api.emergent.sh), bypass LiteLLM's path formatting bugs
+        if "emergent.sh" in api_base:
+            try:
+                response_json = await self._send_direct_proxy_request(messages)
+                return response_json["choices"][0]["message"]["content"] or ""
+            except Exception as e:
+                log.error(f"Error calling direct completions: {e}")
+                raise
+        else:
+            # Fallback to standard LiteLLM for custom base URL overrides
+            log.info(f"Sending message to {model_name} via LiteLLM override to {api_base}")
+            try:
+                response = await litellm.acompletion(
+                    model=model_name,
+                    messages=messages,
+                    api_key=self.api_key,
+                    api_base=api_base,
+                    **self.params
+                )
+                return response.choices[0].message.content or ""
+            except Exception as e:
+                log.error(f"Error calling litellm completions: {e}")
+                raise
 
     async def send_message_multimodal_response(self, message: UserMessage) -> Tuple[str, List[Dict[str, Any]]]:
         api_base, model_name = self._get_api_setup()
@@ -71,28 +113,42 @@ class LlmChat:
             {"role": "user", "content": message.text}
         ]
         
-        log.info(f"Sending multimodal message to {model_name} via {api_base}")
-        try:
-            response = await litellm.acompletion(
-                model=model_name,
-                messages=messages,
-                api_key=self.api_key,
-                api_base=api_base,
-                **self.params
-            )
-        except Exception as e:
-            log.error(f"Error calling multimodal completions: {e}")
-            raise
-
         text_content = ""
         images = []
+        raw_response = {}
         
-        if response.choices:
-            message_obj = response.choices[0].message
-            text_content = message_obj.content or ""
-            
-            # Recursively find any base64 image data in response dict
-            raw_response = response.dict() if hasattr(response, 'dict') else dict(response)
+        # If calling the default platform proxy, bypass LiteLLM
+        if "emergent.sh" in api_base:
+            log.info(f"Sending direct multimodal completions request to: {api_base}")
+            try:
+                raw_response = await self._send_direct_proxy_request(messages)
+                if raw_response.get("choices"):
+                    message_obj = raw_response["choices"][0]["message"]
+                    text_content = message_obj.get("content") or ""
+            except Exception as e:
+                log.error(f"Error calling direct multimodal completions: {e}")
+                raise
+        else:
+            # Fallback to standard LiteLLM
+            log.info(f"Sending multimodal message to {model_name} via LiteLLM override to {api_base}")
+            try:
+                response = await litellm.acompletion(
+                    model=model_name,
+                    messages=messages,
+                    api_key=self.api_key,
+                    api_base=api_base,
+                    **self.params
+                )
+                if response.choices:
+                    message_obj = response.choices[0].message
+                    text_content = message_obj.content or ""
+                    raw_response = response.dict() if hasattr(response, 'dict') else dict(response)
+            except Exception as e:
+                log.error(f"Error calling litellm multimodal completions: {e}")
+                raise
+
+        # Extract images from response dict
+        if raw_response:
             images = self._find_images(raw_response)
             
         # Fallback if no images found but we expected image modality
