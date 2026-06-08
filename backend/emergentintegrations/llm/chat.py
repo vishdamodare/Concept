@@ -18,7 +18,7 @@ class LlmChat:
         self.session_id = session_id
         self.system_message = system_message
         self.provider = "anthropic"
-        self.model = os.environ.get("LLM_MODEL") or "claude-3-5-sonnet-20241022"
+        self.model = os.environ.get("LLM_MODEL") or "claude-sonnet-4-6"
         self.params = {}
 
     def with_model(self, provider: str, model: str):
@@ -34,12 +34,10 @@ class LlmChat:
         # Resolve api_base
         api_base = os.environ.get("LITELLM_API_BASE") or os.environ.get("OPENAI_API_BASE") or "https://api.emergent.sh/v1"
         
-        # Always use 'openai/' prefix to force LiteLLM to call the OpenAI-compatible 
-        # /v1/chat/completions endpoint on the custom proxy (which doesn't implement /v1/messages).
+        # Resolve model name using standard provider prefix (compatible with the custom wheel)
         model_name = self.model
-        if "/" in model_name:
-            model_name = model_name.split("/")[-1]
-        model_name = f"openai/{model_name}"
+        if self.provider and "/" not in model_name:
+            model_name = f"{self.provider}/{self.model}"
         
         return api_base, model_name
 

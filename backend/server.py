@@ -205,7 +205,7 @@ Rules:
 
 def make_chat(session_id: str, system: str, provider: str = "anthropic", model: str = None) -> LlmChat:
     if model is None:
-        model = os.environ.get("LLM_MODEL") or "claude-3-5-sonnet-20241022"
+        model = os.environ.get("LLM_MODEL") or "claude-sonnet-4-6"
     return LlmChat(
         api_key=EMERGENT_LLM_KEY,
         session_id=session_id,

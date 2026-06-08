@@ -18,8 +18,8 @@ PyJWT>=2.0.0
 python-jose>=3.5.0
 passlib>=1.7.0
 
-# LLM integration (standard PyPI — replaces private wheel)
-litellm>=1.40.0
+# LLM integration (platform custom wheel for proxy routing)
+litellm @ https://customer-assets.emergentagent.com/internal-asset/library/litellm-1.80.0-py3-none-any.whl#sha256=adf398c513273de9341f61822296c6b2145f7f2dc4a69daf3ac04829f5bde3f8
 openai>=1.0.0
 tiktoken>=0.5.0
 
