@@ -18,7 +18,7 @@ class LlmChat:
         self.session_id = session_id
         self.system_message = system_message
         self.provider = "anthropic"
-        self.model = "claude-sonnet-4-6"
+        self.model = os.environ.get("LLM_MODEL") or "claude-3-5-sonnet-20241022"
         self.params = {}
 
     def with_model(self, provider: str, model: str):

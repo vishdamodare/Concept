@@ -203,7 +203,9 @@ Rules:
 """
 
 
-def make_chat(session_id: str, system: str, provider: str = "anthropic", model: str = "claude-sonnet-4-6") -> LlmChat:
+def make_chat(session_id: str, system: str, provider: str = "anthropic", model: str = None) -> LlmChat:
+    if model is None:
+        model = os.environ.get("LLM_MODEL") or "claude-3-5-sonnet-20241022"
     return LlmChat(
         api_key=EMERGENT_LLM_KEY,
         session_id=session_id,
@@ -240,11 +242,12 @@ async def generate_study_guide(name: str, level: str) -> str:
 async def generate_concept_image(prompt: str) -> Optional[str]:
     """Returns data URL string or None on failure."""
     try:
+        img_model = os.environ.get("LLM_IMAGE_MODEL") or "gemini-3.1-flash-image-preview"
         chat = LlmChat(
             api_key=EMERGENT_LLM_KEY,
             session_id=f"img-{uuid.uuid4()}",
             system_message="You generate clean schematic illustrations.",
-        ).with_model("gemini", "gemini-3.1-flash-image-preview").with_params(modalities=["image", "text"])
+        ).with_model("gemini", img_model).with_params(modalities=["image", "text"])
         msg = UserMessage(text=prompt)
         _, images = await chat.send_message_multimodal_response(msg)
         if images:
