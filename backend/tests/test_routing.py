@@ -67,5 +67,28 @@ class TestLlmRouting(unittest.TestCase):
         self.assertTrue(use_direct_proxy)
         self.assertEqual(target_api_key, "sk-emergent-key")
 
+from unittest.mock import AsyncMock, patch
+
+class TestLlmRetry(unittest.IsolatedAsyncioTestCase):
+    @patch("asyncio.sleep", new_callable=AsyncMock)
+    async def test_retry_on_rate_limit(self, mock_sleep):
+        # GIVEN LlmChat instance
+        chat = LlmChat(api_key="sk-key", session_id="test", system_message="sys")
+        
+        # GIVEN a mock function that fails with a 429 Rate Limit error once, then succeeds
+        mock_func = AsyncMock()
+        mock_func.side_effect = [
+            Exception("RateLimitError: 429 Quota Exceeded"),
+            "success-response"
+        ]
+        
+        # WHEN executing with retry
+        res = await chat._execute_with_retry(mock_func)
+        
+        # THEN it should succeed after retrying once
+        self.assertEqual(res, "success-response")
+        self.assertEqual(mock_func.call_count, 2)
+        mock_sleep.assert_called_once_with(2.0)
+
 if __name__ == "__main__":
     unittest.main()

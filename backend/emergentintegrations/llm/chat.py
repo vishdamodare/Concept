@@ -1,6 +1,7 @@
 import os
 import uuid
 import logging
+import asyncio
 from typing import List, Optional, Tuple, Dict, Any
 import httpx
 import litellm
@@ -96,6 +97,26 @@ class LlmChat:
                 raise Exception(f"Proxy error ({response.status_code}): {response.text}")
             return response.json()
 
+    async def _execute_with_retry(self, func, *args, **kwargs):
+        max_retries = 5
+        delay = 2.0
+        for attempt in range(max_retries):
+            try:
+                return await func(*args, **kwargs)
+            except Exception as e:
+                # Check if this is a rate limit or quota error (429/quota exceeded)
+                is_rate_limit = False
+                err_str = str(e).lower()
+                if "ratelimit" in err_str or "429" in err_str or "quota" in err_str or "limit" in err_str:
+                    is_rate_limit = True
+                
+                if is_rate_limit and attempt < max_retries - 1:
+                    log.warning(f"LLM rate limit or quota hit (attempt {attempt + 1}/{max_retries}). Retrying in {delay}s... Error: {e}")
+                    await asyncio.sleep(delay)
+                    delay *= 2.0  # exponential backoff
+                else:
+                    raise
+
     async def send_message(self, message: UserMessage) -> str:
         api_base, model_name, use_direct_proxy, target_api_key = self._get_api_setup()
         
@@ -107,7 +128,7 @@ class LlmChat:
         if use_direct_proxy:
             # Route default proxy calls directly via httpx
             try:
-                response_json = await self._send_direct_proxy_request(messages)
+                response_json = await self._execute_with_retry(self._send_direct_proxy_request, messages)
                 return response_json["choices"][0]["message"]["content"] or ""
             except Exception as e:
                 log.error(f"Error calling direct completions: {e}")
@@ -116,7 +137,8 @@ class LlmChat:
             # Fallback to standard LiteLLM (passes None to api_base if it is the default proxy, letting LiteLLM call Google directly)
             log.info(f"Sending message to {model_name} via LiteLLM to {api_base or 'default endpoint'}")
             try:
-                response = await litellm.acompletion(
+                response = await self._execute_with_retry(
+                    litellm.acompletion,
                     model=model_name,
                     messages=messages,
                     api_key=target_api_key,
@@ -143,7 +165,7 @@ class LlmChat:
         if use_direct_proxy:
             log.info(f"Sending direct multimodal completions request to: {api_base}")
             try:
-                raw_response = await self._send_direct_proxy_request(messages)
+                raw_response = await self._execute_with_retry(self._send_direct_proxy_request, messages)
                 if raw_response.get("choices"):
                     message_obj = raw_response["choices"][0]["message"]
                     text_content = message_obj.get("content") or ""
@@ -154,7 +176,8 @@ class LlmChat:
             # Fallback to standard LiteLLM
             log.info(f"Sending multimodal message to {model_name} via LiteLLM to {api_base or 'default endpoint'}")
             try:
-                response = await litellm.acompletion(
+                response = await self._execute_with_retry(
+                    litellm.acompletion,
                     model=model_name,
                     messages=messages,
                     api_key=target_api_key,
