@@ -30,23 +30,29 @@ class LlmChat:
         self.params.update(kwargs)
         return self
 
-    def _get_api_setup(self) -> str:
-        # Resolve api_base
-        return os.environ.get("LITELLM_API_BASE") or os.environ.get("OPENAI_API_BASE") or "https://api.emergent.sh/v1"
+    def _get_api_setup(self) -> Tuple[str, str]:
+        # Resolve api_base (defaults to the root host, without the /v1 suffix, to allow LiteLLM to append endpoints correctly)
+        api_base = os.environ.get("LITELLM_API_BASE") or os.environ.get("OPENAI_API_BASE") or "https://api.emergent.sh"
+        
+        # Resolve model name
+        model_name = self.model
+        if self.provider and "/" not in model_name:
+            model_name = f"{self.provider}/{self.model}"
+        
+        return api_base, model_name
 
     async def send_message(self, message: UserMessage) -> str:
-        api_base = self._get_api_setup()
+        api_base, model_name = self._get_api_setup()
         
         messages = [
             {"role": "system", "content": self.system_message},
             {"role": "user", "content": message.text}
         ]
         
-        log.info(f"Sending message to {self.model} via {api_base}")
+        log.info(f"Sending message to {model_name} via {api_base}")
         try:
             response = await litellm.acompletion(
-                model=self.model,
-                custom_llm_provider="openai",
+                model=model_name,
                 messages=messages,
                 api_key=self.api_key,
                 api_base=api_base,
@@ -58,18 +64,17 @@ class LlmChat:
             raise
 
     async def send_message_multimodal_response(self, message: UserMessage) -> Tuple[str, List[Dict[str, Any]]]:
-        api_base = self._get_api_setup()
+        api_base, model_name = self._get_api_setup()
         
         messages = [
             {"role": "system", "content": self.system_message},
             {"role": "user", "content": message.text}
         ]
         
-        log.info(f"Sending multimodal message to {self.model} via {api_base}")
+        log.info(f"Sending multimodal message to {model_name} via {api_base}")
         try:
             response = await litellm.acompletion(
-                model=self.model,
-                custom_llm_provider="openai",
+                model=model_name,
                 messages=messages,
                 api_key=self.api_key,
                 api_base=api_base,
