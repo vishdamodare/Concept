@@ -13,7 +13,7 @@ class UserMessage:
         self.text = text
 
 class LlmChat:
-    """Replacement for LlmChat routing requests via direct httpx or litellm to the platform LLM proxy."""
+    """Replacement for LlmChat routing requests via direct httpx or litellm to the platform LLM proxy or direct providers."""
     def __init__(self, api_key: str, session_id: str, system_message: str):
         self.api_key = api_key
         self.session_id = session_id
@@ -81,8 +81,12 @@ class LlmChat:
             {"role": "user", "content": message.text}
         ]
         
-        # If calling the default platform proxy (api.emergent.sh), bypass LiteLLM's path formatting bugs
-        if "emergent.sh" in api_base:
+        # Determine if we should bypass the proxy (e.g. if we have a direct Google/Gemini key set)
+        gemini_key = os.environ.get("GEMINI_API_KEY") or os.environ.get("GOOGLE_API_KEY")
+        use_direct_proxy = ("emergent.sh" in api_base) and not (gemini_key or self.provider == "gemini" or "gemini" in model_name)
+        
+        if use_direct_proxy:
+            # Route default proxy calls directly via httpx
             try:
                 response_json = await self._send_direct_proxy_request(messages)
                 return response_json["choices"][0]["message"]["content"] or ""
@@ -90,14 +94,21 @@ class LlmChat:
                 log.error(f"Error calling direct completions: {e}")
                 raise
         else:
-            # Fallback to standard LiteLLM for custom base URL overrides
-            log.info(f"Sending message to {model_name} via LiteLLM override to {api_base}")
+            # Fallback to standard LiteLLM (passes None to api_base if it is the default proxy, letting LiteLLM call Google directly)
+            target_api_base = api_base if "emergent.sh" not in api_base else None
+            target_api_key = self.api_key
+            
+            # If calling Gemini directly, supply the key
+            if "gemini" in model_name or self.provider == "gemini":
+                target_api_key = gemini_key or self.api_key
+                
+            log.info(f"Sending message to {model_name} via LiteLLM to {target_api_base or 'default endpoint'}")
             try:
                 response = await litellm.acompletion(
                     model=model_name,
                     messages=messages,
-                    api_key=self.api_key,
-                    api_base=api_base,
+                    api_key=target_api_key,
+                    api_base=target_api_base,
                     **self.params
                 )
                 return response.choices[0].message.content or ""
@@ -117,8 +128,11 @@ class LlmChat:
         images = []
         raw_response = {}
         
-        # If calling the default platform proxy, bypass LiteLLM
-        if "emergent.sh" in api_base:
+        # Determine if we should bypass the proxy
+        gemini_key = os.environ.get("GEMINI_API_KEY") or os.environ.get("GOOGLE_API_KEY")
+        use_direct_proxy = ("emergent.sh" in api_base) and not (gemini_key or self.provider == "gemini" or "gemini" in model_name)
+        
+        if use_direct_proxy:
             log.info(f"Sending direct multimodal completions request to: {api_base}")
             try:
                 raw_response = await self._send_direct_proxy_request(messages)
@@ -130,13 +144,19 @@ class LlmChat:
                 raise
         else:
             # Fallback to standard LiteLLM
-            log.info(f"Sending multimodal message to {model_name} via LiteLLM override to {api_base}")
+            target_api_base = api_base if "emergent.sh" not in api_base else None
+            target_api_key = self.api_key
+            
+            if "gemini" in model_name or self.provider == "gemini":
+                target_api_key = gemini_key or self.api_key
+                
+            log.info(f"Sending multimodal message to {model_name} via LiteLLM to {target_api_base or 'default endpoint'}")
             try:
                 response = await litellm.acompletion(
                     model=model_name,
                     messages=messages,
-                    api_key=self.api_key,
-                    api_base=api_base,
+                    api_key=target_api_key,
+                    api_base=target_api_base,
                     **self.params
                 )
                 if response.choices:
