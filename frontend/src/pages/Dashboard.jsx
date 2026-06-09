@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useRef, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useSearchParams, Link } from "react-router-dom";
 import { apiClient, formatErr } from "../lib/api";
 import { toast } from "sonner";
@@ -27,31 +27,9 @@ export default function Dashboard() {
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [stage, setStage] = useState(0);
-  const seedTriggered = useRef(false);
+  const triggeredSeedRef = useRef(null);
 
-  useEffect(() => {
-    apiClient.get("/concepts")
-      .then((r) => setItems(r.data))
-      .catch((e) => toast.error(formatErr(e)))
-      .finally(() => setLoading(false));
-  }, []);
-
-  // Auto-generate if landed with ?seed= (ref guard survives Strict Mode remount)
-  useEffect(() => {
-    if (!seed || seedTriggered.current) return;
-    seedTriggered.current = true;
-    setSp({}, { replace: true });
-    handleGenerate(seed, level);
-  }, []);
-
-  // Rotating loader stage
-  useEffect(() => {
-    if (!busy) return undefined;
-    const t = setInterval(() => setStage((s) => (s + 1) % STAGES.length), 2200);
-    return () => clearInterval(t);
-  }, [busy]);
-
-  const handleGenerate = async (n, l) => {
+  const handleGenerate = useCallback(async (n, l) => {
     const name = (n ?? concept).trim();
     const lvl = l ?? level;
     if (name.length < 2) {
@@ -68,7 +46,36 @@ export default function Dashboard() {
     } finally {
       setBusy(false);
     }
-  };
+  }, [concept, level, nav]);
+
+  useEffect(() => {
+    apiClient.get("/concepts")
+      .then((r) => setItems(r.data))
+      .catch((e) => toast.error(formatErr(e)))
+      .finally(() => setLoading(false));
+  }, []);
+
+  // Auto-generate when ?seed= appears (ref tracks current seed for Strict Mode + re-navigation)
+  useEffect(() => {
+    if (!seed) {
+      triggeredSeedRef.current = null;
+      return;
+    }
+    const lvl = LEVELS.includes(seedLevel) ? seedLevel : "beginner";
+    if (triggeredSeedRef.current === seed) return;
+    triggeredSeedRef.current = seed;
+    setConcept(seed);
+    setLevel(lvl);
+    setSp({}, { replace: true });
+    handleGenerate(seed, lvl);
+  }, [seed, seedLevel, setSp, handleGenerate]);
+
+  // Rotating loader stage
+  useEffect(() => {
+    if (!busy) return undefined;
+    const t = setInterval(() => setStage((s) => (s + 1) % STAGES.length), 2200);
+    return () => clearInterval(t);
+  }, [busy]);
 
   const onDelete = async (id, name) => {
     if (!window.confirm(`Delete "${name}"? This can't be undone.`)) return;
