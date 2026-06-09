@@ -22,6 +22,7 @@ from fastapi.responses import PlainTextResponse, StreamingResponse
 from starlette.middleware.cors import CORSMiddleware
 from motor.motor_asyncio import AsyncIOMotorClient
 from pymongo import ReturnDocument
+from pymongo.errors import DuplicateKeyError
 from pydantic import BaseModel, Field, EmailStr, ConfigDict
 
 from emergentintegrations.llm.chat import LlmChat, UserMessage
@@ -396,7 +397,10 @@ async def register(body: RegisterIn, response: Response):
         "role": "user",
         "created_at": datetime.now(timezone.utc).isoformat(),
     }
-    await db.users.insert_one(doc)
+    try:
+        await db.users.insert_one(doc)
+    except DuplicateKeyError:
+        raise HTTPException(status_code=400, detail="Email already registered")
     token = create_access_token(user_id, email)
     set_auth_cookie(response, token)
     return {"id": user_id, "email": email, "name": doc["name"], "token": token}
