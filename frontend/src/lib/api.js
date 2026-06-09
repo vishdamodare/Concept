@@ -14,6 +14,19 @@ apiClient.interceptors.request.use((config) => {
   return config;
 });
 
+apiClient.interceptors.response.use(
+  (response) => response,
+  (error) => {
+    if (error?.response?.status === 401 && !error.config?.url?.includes("/auth/login")) {
+      localStorage.removeItem("cf_token");
+      if (!window.location.pathname.startsWith("/login")) {
+        window.location.assign("/login");
+      }
+    }
+    return Promise.reject(error);
+  },
+);
+
 export const formatErr = (e) => {
   const d = e?.response?.data?.detail;
   if (!d) return e?.message || "Something went wrong";
