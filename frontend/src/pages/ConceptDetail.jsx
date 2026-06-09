@@ -1,6 +1,7 @@
 import React, { useEffect, useRef, useState } from "react";
 import { useParams, Link } from "react-router-dom";
 import { apiClient, formatErr } from "../lib/api";
+import { isSafeHttpUrl, isSafeImageSrc, isSafeYouTubeEmbedUrl } from "../lib/utils";
 import { toast } from "sonner";
 import Markdown from "../components/Markdown";
 import {
@@ -314,28 +315,38 @@ function ResourcesTab({ concept }) {
             <ul className="space-y-3">
               {(cat.items || []).map((it, ii) => {
                 const Icon = KIND_ICON[it.kind] || ArticleMedium;
+                const safeUrl = isSafeHttpUrl(it.url);
+                const rowClass = "group flex gap-3 items-start p-2 -mx-2 border border-transparent hover:border-black hover:bg-zinc-50 transition";
+                const inner = (
+                  <>
+                    <Icon size={18} weight="duotone" className="text-[#002FA7] shrink-0 mt-0.5" />
+                    <div className="flex-1 min-w-0">
+                      <div className="font-display font-bold text-sm leading-snug group-hover:text-[#002FA7] flex items-center gap-1">
+                        <span className="truncate">{it.title}</span>
+                        {safeUrl && (
+                          <ArrowSquareOut size={12} weight="bold" className="opacity-0 group-hover:opacity-100 shrink-0" />
+                        )}
+                      </div>
+                      {it.description && (
+                        <p className="mt-1 font-mono text-xs text-zinc-600 leading-relaxed line-clamp-2">
+                          {it.description}
+                        </p>
+                      )}
+                      <div className="mt-1 font-mono text-[10px] text-zinc-400 truncate">
+                        {safeUrl ? safeHost(it.url) : "Unsafe link blocked"}
+                      </div>
+                    </div>
+                  </>
+                );
                 return (
                   <li key={ii} data-testid={`resource-item-${ci}-${ii}`}>
-                    <a
-                      href={it.url}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="group flex gap-3 items-start p-2 -mx-2 border border-transparent hover:border-black hover:bg-zinc-50 transition"
-                    >
-                      <Icon size={18} weight="duotone" className="text-[#002FA7] shrink-0 mt-0.5" />
-                      <div className="flex-1 min-w-0">
-                        <div className="font-display font-bold text-sm leading-snug group-hover:text-[#002FA7] flex items-center gap-1">
-                          <span className="truncate">{it.title}</span>
-                          <ArrowSquareOut size={12} weight="bold" className="opacity-0 group-hover:opacity-100 shrink-0" />
-                        </div>
-                        {it.description && (
-                          <p className="mt-1 font-mono text-xs text-zinc-600 leading-relaxed line-clamp-2">
-                            {it.description}
-                          </p>
-                        )}
-                        <div className="mt-1 font-mono text-[10px] text-zinc-400 truncate">{safeHost(it.url)}</div>
-                      </div>
-                    </a>
+                    {safeUrl ? (
+                      <a href={it.url} target="_blank" rel="noopener noreferrer" className={rowClass}>
+                        {inner}
+                      </a>
+                    ) : (
+                      <div className={rowClass}>{inner}</div>
+                    )}
                   </li>
                 );
               })}
@@ -361,14 +372,20 @@ function VideosTab({ concept }) {
       {videos.map((v) => (
         <div data-testid={`video-${v.id}`} key={v.id} className="brut-card overflow-hidden">
           <div className="relative w-full" style={{ paddingBottom: "56.25%" }}>
-            <iframe
-              title={v.title}
-              src={v.embed}
-              className="absolute inset-0 h-full w-full"
-              frameBorder="0"
-              allow="accelerometer; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
-              allowFullScreen
-            />
+            {isSafeYouTubeEmbedUrl(v.embed) ? (
+              <iframe
+                title={v.title}
+                src={v.embed}
+                className="absolute inset-0 h-full w-full"
+                frameBorder="0"
+                allow="accelerometer; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+                allowFullScreen
+              />
+            ) : (
+              <div className="absolute inset-0 flex items-center justify-center bg-zinc-100 font-mono text-xs text-zinc-600 p-4 text-center">
+                Video embed unavailable
+              </div>
+            )}
           </div>
           <div className="p-4 border-t border-black">
             <div className="font-display font-bold text-sm leading-tight line-clamp-2">{v.title}</div>
@@ -381,7 +398,7 @@ function VideosTab({ concept }) {
 }
 
 function ImageTab({ concept }) {
-  if (!concept.image) {
+  if (!concept.image || !isSafeImageSrc(concept.image)) {
     return <div data-testid="image-tab" className="font-mono text-sm text-zinc-600">No image was generated for this concept.</div>;
   }
   return (
