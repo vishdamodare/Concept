@@ -46,8 +46,20 @@ EMERGENT_LLM_KEY = os.environ.get('EMERGENT_LLM_KEY', '')
 if not EMERGENT_LLM_KEY:
     log.warning("EMERGENT_LLM_KEY not set – LLM features will fail. Set this env var!")
 
-JWT_SECRET = os.environ.get('JWT_SECRET', 'dev-secret-change-me-in-production')
-if 'JWT_SECRET' not in os.environ:
+DEV_JWT_SECRET = 'dev-secret-change-me-in-production'
+
+def _is_production() -> bool:
+    env = (os.environ.get('ENV') or os.environ.get('ENVIRONMENT') or '').lower()
+    return env == 'production' or bool(os.environ.get('RENDER'))
+
+JWT_SECRET = os.environ.get('JWT_SECRET', DEV_JWT_SECRET)
+if _is_production():
+    if not os.environ.get('JWT_SECRET') or JWT_SECRET == DEV_JWT_SECRET:
+        raise RuntimeError(
+            "JWT_SECRET must be set to a strong random value in production; "
+            "the insecure dev default is not allowed."
+        )
+elif 'JWT_SECRET' not in os.environ:
     log.warning("JWT_SECRET not set – using insecure default. Set this env var for production!")
 
 JWT_ALG = 'HS256'
