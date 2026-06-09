@@ -743,6 +743,10 @@ async def post_chat(concept_id: str, body: ChatIn, user: dict = Depends(get_curr
     concept = await db.concepts.find_one({"id": concept_id, "user_id": user["id"]}, {"_id": 0})
     if not concept:
         raise HTTPException(status_code=404, detail="Concept not found")
+    if concept.get("status") == "generating":
+        raise HTTPException(status_code=409, detail="Concept is still generating")
+    if concept.get("status") == "failed":
+        raise HTTPException(status_code=409, detail="Concept generation failed")
 
     # Save user message
     user_msg = {
