@@ -28,6 +28,7 @@ export default function ConceptDetail() {
   const [tab, setTab] = useState("roadmap");
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState(null);
+  const progressSeq = useRef(0);
 
   useEffect(() => {
     let cancelled = false;
@@ -59,17 +60,26 @@ export default function ConceptDetail() {
 
   const toggleMilestone = async (index, completed) => {
     if (!concept) return;
-    const prev = concept.progress || [];
-    const next = new Set(prev);
+    const seq = ++progressSeq.current;
+    const next = new Set(concept.progress || []);
     if (completed) next.add(index); else next.delete(index);
     const optimistic = Array.from(next).sort((a, b) => a - b);
     setConcept({ ...concept, progress: optimistic });
     try {
       const r = await apiClient.patch(`/concepts/${id}/progress`, { index, completed });
+      if (seq !== progressSeq.current) return;
       setConcept((c) => c ? { ...c, progress: r.data.progress } : c);
     } catch (e) {
+      if (seq !== progressSeq.current) return;
       toast.error(formatErr(e));
-      setConcept((c) => c ? { ...c, progress: prev } : c);
+      try {
+        const r = await apiClient.get(`/concepts/${id}`);
+        if (seq === progressSeq.current) {
+          setConcept(r.data);
+        }
+      } catch {
+        // leave current optimistic state if refresh fails
+      }
     }
   };
 
