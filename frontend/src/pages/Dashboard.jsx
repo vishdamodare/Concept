@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useSearchParams, Link } from "react-router-dom";
 import { apiClient, formatErr } from "../lib/api";
 import { toast } from "sonner";
@@ -27,6 +27,7 @@ export default function Dashboard() {
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [stage, setStage] = useState(0);
+  const seedTriggered = useRef(false);
 
   useEffect(() => {
     apiClient.get("/concepts")
@@ -35,14 +36,12 @@ export default function Dashboard() {
       .finally(() => setLoading(false));
   }, []);
 
-  // Auto-generate if landed with ?seed=
+  // Auto-generate if landed with ?seed= (ref guard survives Strict Mode remount)
   useEffect(() => {
-    if (seed && concept === seed && !busy) {
-      // run once
-      // eslint-disable-next-line
-      handleGenerate(seed, level);
-      setSp({}, { replace: true });
-    }
+    if (!seed || seedTriggered.current) return;
+    seedTriggered.current = true;
+    setSp({}, { replace: true });
+    handleGenerate(seed, level);
   }, []);
 
   // Rotating loader stage
