@@ -504,7 +504,7 @@ async def _run_concept_generation(concept_id: str, user_id: str, name: str, leve
         log.exception(f"concept generation failed for {concept_id}")
         await db.concepts.update_one(
             {"id": concept_id, "user_id": user_id},
-            {"$set": {"status": "failed", "error": str(e)[:240]}},
+            {"$set": {"status": "failed", "error": "Concept generation failed. Please try again."}},
         )
 
 
@@ -781,7 +781,7 @@ async def post_chat(concept_id: str, body: ChatIn, user: dict = Depends(get_curr
         reply = await chat.send_message(UserMessage(text=prompt_text))
     except Exception as e:
         log.exception("tutor reply failed")
-        raise HTTPException(status_code=502, detail=f"Tutor failed: {e}")
+        raise HTTPException(status_code=502, detail="Tutor is temporarily unavailable. Please try again.")
 
     asst_msg = {
         "id": str(uuid.uuid4()),
