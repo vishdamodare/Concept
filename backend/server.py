@@ -116,12 +116,12 @@ async def get_current_user(request: Request) -> dict:
 # ----------------------------- Models --------------------------------
 class RegisterIn(BaseModel):
     email: EmailStr
-    password: str = Field(min_length=6)
+    password: str = Field(min_length=6, max_length=72)
     name: str = Field(min_length=1, max_length=80)
 
 class LoginIn(BaseModel):
     email: EmailStr
-    password: str
+    password: str = Field(max_length=72)
 
 class GenerateIn(BaseModel):
     name: str = Field(min_length=2, max_length=120)
