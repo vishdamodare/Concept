@@ -800,22 +800,23 @@ async def on_startup():
         await db.concepts.create_index([("user_id", 1), ("created_at", -1)])
         await db.chat_messages.create_index([("concept_id", 1), ("created_at", 1)])
 
-        # Seed admin
+        # Seed admin only when ADMIN_PASSWORD is explicitly set (never use a default password)
         admin_email = os.environ.get("ADMIN_EMAIL", "admin@conceptforge.app").lower()
-        admin_pw = os.environ.get("ADMIN_PASSWORD", "admin123")
-        existing = await db.users.find_one({"email": admin_email})
-        if not existing:
-            await db.users.insert_one({
-                "id": str(uuid.uuid4()),
-                "email": admin_email,
-                "name": "Admin",
-                "password_hash": hash_password(admin_pw),
-                "role": "admin",
-                "created_at": datetime.now(timezone.utc).isoformat(),
-            })
-            log.info(f"Seeded admin {admin_email}")
-        elif not verify_password(admin_pw, existing["password_hash"]):
-            await db.users.update_one({"email": admin_email}, {"$set": {"password_hash": hash_password(admin_pw)}})
+        admin_pw = os.environ.get("ADMIN_PASSWORD")
+        if admin_pw:
+            existing = await db.users.find_one({"email": admin_email})
+            if not existing:
+                await db.users.insert_one({
+                    "id": str(uuid.uuid4()),
+                    "email": admin_email,
+                    "name": "Admin",
+                    "password_hash": hash_password(admin_pw),
+                    "role": "admin",
+                    "created_at": datetime.now(timezone.utc).isoformat(),
+                })
+                log.info(f"Seeded admin {admin_email}")
+        elif _is_production():
+            log.warning("ADMIN_PASSWORD not set – skipping admin seed in production")
     except Exception as e:
         log.error(f"Startup DB init failed (server will continue): {e}")
 
