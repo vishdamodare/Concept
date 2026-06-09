@@ -423,29 +423,28 @@ async def me(user: dict = Depends(get_current_user)):
 # ----------------------------- Routes: Concepts ----------------------
 
 async def _run_concept_generation(concept_id: str, user_id: str, name: str, level: str):
-    """Background task — runs every independent step in parallel from t=0.
+    """Background task — builds a full concept learning pack.
 
     Pipeline:
-      t=0  : roadmap, study_guide, prelim youtube, prelim web search (all parallel)
-      t≈60s: once roadmap arrives, kick off image (uses image_prompt) + resources (uses web results)
+      Phase 1: roadmap + study_guide (parallel)
+      Phase 2: image, YouTube, and web search using roadmap-tailored queries
+      Phase 3: curate web results into resource categories
     """
     try:
-        # Phase 1 — start everything that doesn't need roadmap output
         prelim_video_queries = [f"{name} tutorial", f"{name} explained", f"{name} crash course"]
         prelim_web_queries = [f"{name} guide", f"{name} documentation", f"{name} introduction", f"{name} tutorial"]
 
         roadmap_task = asyncio.create_task(generate_roadmap(name, level))
         guide_task = asyncio.create_task(generate_study_guide(name, level))
-        video_task = asyncio.create_task(search_youtube(prelim_video_queries))
-        web_task = asyncio.create_task(search_web(prelim_web_queries, per_query=4))
 
-        # Wait for roadmap; once it lands we can start image + resources curation
         roadmap = await roadmap_task
         await db.concepts.update_one(
             {"id": concept_id, "user_id": user_id},
             {"$set": {"roadmap": roadmap, "stage": "expanding"}},
         )
 
+        video_queries = roadmap.get("video_queries") or prelim_video_queries
+        search_queries = roadmap.get("search_queries") or prelim_web_queries
         img_prompt = roadmap.get("image_prompt") or f"Schematic blueprint illustration of {name}"
 
         async def _curate_resources_from(raw_results):
@@ -478,7 +477,9 @@ async def _run_concept_generation(concept_id: str, user_id: str, name: str, leve
                 }
 
         image_task = asyncio.create_task(generate_concept_image(img_prompt))
-        # Wait for web search to finish, then curate. guide + videos already running.
+        video_task = asyncio.create_task(search_youtube(video_queries))
+        web_task = asyncio.create_task(search_web(search_queries, per_query=4))
+
         web_results = await web_task
         resources_task = asyncio.create_task(_curate_resources_from(web_results))
 
