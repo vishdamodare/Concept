@@ -104,11 +104,16 @@ class LlmChat:
             try:
                 return await func(*args, **kwargs)
             except Exception as e:
-                # Check if this is a rate limit or quota error (429/quota exceeded)
-                is_rate_limit = False
+                # Retry only on explicit rate-limit / quota signals, not generic "limit" errors
+                # (e.g. context-length limits should fail fast, not backoff 5 times).
                 err_str = str(e).lower()
-                if "ratelimit" in err_str or "429" in err_str or "quota" in err_str or "limit" in err_str:
-                    is_rate_limit = True
+                is_rate_limit = (
+                    "ratelimit" in err_str
+                    or "rate limit" in err_str
+                    or "429" in err_str
+                    or "quota" in err_str
+                    or "too many requests" in err_str
+                )
                 
                 if is_rate_limit and attempt < max_retries - 1:
                     log.warning(f"LLM rate limit or quota hit (attempt {attempt + 1}/{max_retries}). Retrying in {delay}s... Error: {e}")
