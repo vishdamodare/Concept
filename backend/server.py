@@ -587,6 +587,8 @@ async def update_progress(concept_id: str, body: ProgressIn, user: dict = Depend
         return_document=ReturnDocument.AFTER,
         projection={"progress": 1},
     )
+    if not updated:
+        raise HTTPException(status_code=404, detail="Concept not found")
     new_progress = sorted(updated.get("progress") or [])
     return {"id": concept_id, "progress": new_progress, "total": len(milestones)}
 
