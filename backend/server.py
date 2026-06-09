@@ -21,6 +21,7 @@ from fastapi import FastAPI, APIRouter, HTTPException, Request, Response, Depend
 from fastapi.responses import PlainTextResponse, StreamingResponse
 from starlette.middleware.cors import CORSMiddleware
 from motor.motor_asyncio import AsyncIOMotorClient
+from pymongo import ReturnDocument
 from pydantic import BaseModel, Field, EmailStr, ConfigDict
 
 from emergentintegrations.llm.chat import LlmChat, UserMessage
@@ -570,16 +571,18 @@ async def update_progress(concept_id: str, body: ProgressIn, user: dict = Depend
     milestones = (doc.get("roadmap") or {}).get("milestones") or []
     if body.index >= len(milestones):
         raise HTTPException(status_code=400, detail="Milestone index out of range")
-    current = set(doc.get("progress") or [])
-    if body.completed:
-        current.add(body.index)
-    else:
-        current.discard(body.index)
-    new_progress = sorted(current)
-    await db.concepts.update_one(
-        {"id": concept_id, "user_id": user["id"]},
-        {"$set": {"progress": new_progress}},
+    update = (
+        {"$addToSet": {"progress": body.index}}
+        if body.completed
+        else {"$pull": {"progress": body.index}}
     )
+    updated = await db.concepts.find_one_and_update(
+        {"id": concept_id, "user_id": user["id"]},
+        update,
+        return_document=ReturnDocument.AFTER,
+        projection={"progress": 1},
+    )
+    new_progress = sorted(updated.get("progress") or [])
     return {"id": concept_id, "progress": new_progress, "total": len(milestones)}
 
 @api.delete("/concepts/{concept_id}")
