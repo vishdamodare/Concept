@@ -27,6 +27,7 @@ export default function ConceptDetail() {
   const [concept, setConcept] = useState(null);
   const [tab, setTab] = useState("roadmap");
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -37,12 +38,14 @@ export default function ConceptDetail() {
         const r = await apiClient.get(`/concepts/${id}`);
         if (cancelled) return;
         setConcept(r.data);
+        setLoadError(null);
         setLoading(false);
         if (r.data?.status === "generating") {
           timer = setTimeout(tick, 3500);
         }
       } catch (e) {
         if (cancelled) return;
+        setLoadError(e?.response?.status === 404 ? "not_found" : "error");
         toast.error(formatErr(e));
         setLoading(false);
       }
@@ -76,10 +79,15 @@ export default function ConceptDetail() {
     );
   }
   if (!concept) {
+    const title = loadError === "not_found" ? "Not found" : "Could not load concept";
+    const detail = loadError === "not_found"
+      ? "This concept does not exist or you do not have access."
+      : "Something went wrong while loading. Please try again.";
     return (
       <div className="mx-auto max-w-7xl px-6 py-12">
         <div className="border border-dashed border-black p-12 text-center">
-          <div className="font-display text-2xl font-bold">Not found</div>
+          <div className="font-display text-2xl font-bold">{title}</div>
+          <p className="mt-2 font-mono text-sm text-zinc-600">{detail}</p>
           <Link to="/app" className="brut-btn mt-4 inline-flex">Back to dashboard</Link>
         </div>
       </div>
