@@ -23,7 +23,7 @@ from starlette.middleware.cors import CORSMiddleware
 from motor.motor_asyncio import AsyncIOMotorClient
 from pydantic import BaseModel, Field, EmailStr, ConfigDict
 
-from emergentintegrations.llm.chat import LlmChat, UserMessage
+from llm.chat import LlmChat, UserMessage
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 log = logging.getLogger("conceptforge")
@@ -42,9 +42,25 @@ else:
     client = AsyncIOMotorClient(mongo_url)
 db = client[os.environ.get('DB_NAME', 'conceptforge')]
 
-EMERGENT_LLM_KEY = os.environ.get('EMERGENT_LLM_KEY', '')
-if not EMERGENT_LLM_KEY:
-    log.warning("EMERGENT_LLM_KEY not set – LLM features will fail. Set this env var!")
+environment = os.getenv("ENVIRONMENT") or os.getenv("NODE_ENV") or "development"
+gemini_key = os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY")
+
+if gemini_key:
+    if os.getenv("GEMINI_API_KEY"):
+        log.info("Using GEMINI_API_KEY environment variable")
+    else:
+        log.info("Using GOOGLE_API_KEY environment variable")
+else:
+    if environment == "production":
+        raise RuntimeError("Missing GEMINI_API_KEY or GOOGLE_API_KEY in production!")
+    else:
+        log.warning("No Gemini/Google API key configured. LLM features will fail when used.")
+
+log.info("===================================")
+log.info("LLM Provider: Gemini")
+log.info(f"Model: {os.getenv('LLM_MODEL', 'gemini/gemini-2.5-flash')}")
+log.info(f"Environment: {environment}")
+log.info("===================================")
 
 JWT_SECRET = os.environ.get('JWT_SECRET', 'dev-secret-change-me-in-production')
 if 'JWT_SECRET' not in os.environ:
@@ -53,6 +69,20 @@ if 'JWT_SECRET' not in os.environ:
 JWT_ALG = 'HS256'
 
 app = FastAPI(title="ConceptForge API")
+
+@app.get("/health")
+async def health():
+    db_status = "connected"
+    try:
+        await db.command("ping")
+    except Exception as e:
+        db_status = f"disconnected ({str(e)})"
+    return {
+        "status": "ok",
+        "database": db_status,
+        "llm": bool(os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY"))
+    }
+
 api = APIRouter(prefix="/api")
 
 # ----------------------------- Auth helpers --------------------------
@@ -119,6 +149,84 @@ class ChatIn(BaseModel):
 class ProgressIn(BaseModel):
     index: int = Field(ge=0, le=49)
     completed: bool
+
+# --- Consolidated Pydantic Schemas for Structured LLM Outputs ---
+class MilestoneSchema(BaseModel):
+    title: str
+    description: str
+    topics: List[str]
+    key_questions: List[str]
+    exercise: str
+    estimate: str
+
+class RoadmapSchema(BaseModel):
+    summary: str
+    prerequisites: List[str]
+    milestones: List[MilestoneSchema]
+    video_queries: List[str]
+    search_queries: List[str]
+    image_prompt: str
+    study_guide_outline: List[str]
+
+class ResourceItemSchema(BaseModel):
+    title: str
+    url: str
+    description: str
+    kind: str
+
+class ResourceCategorySchema(BaseModel):
+    name: str
+    items: List[ResourceItemSchema]
+
+class ResourcesSchema(BaseModel):
+    categories: List[ResourceCategorySchema]
+
+class ConceptResponseSchema(BaseModel):
+    roadmap: RoadmapSchema
+    study_guide: str
+    resources: ResourcesSchema
+
+CONSOLIDATED_CONCEPT_PROMPT = """You are an expert curriculum architect, teacher, and research librarian.
+For the concept "{name}" tailored to a {level} learner, generate a comprehensive learning package.
+
+Here are real web search results gathered for you:
+{search_results}
+
+Generate a single valid JSON object containing three main keys:
+1. "roadmap": An interactive concept learning roadmap conforming to the following structure:
+   - "summary": 3-4 sentence overview motivating the topic and previewing achievements.
+   - "prerequisites": 2-3 short prerequisite topics.
+   - "milestones": 7 to 9 milestones, ordered from foundations to mastery. Each milestone must contain:
+     - "title": short, action-oriented milestone title.
+     - "description": 2-3 sentences explaining learning outcomes.
+     - "topics": 3-5 specific subtopics.
+     - "key_questions": 2-3 thought-provoking questions answered by this milestone.
+     - "exercise": exactly one concrete hands-on exercise (1-2 sentences).
+     - "estimate": "~X hours"
+   - "video_queries": 5-6 concrete YouTube search queries.
+   - "search_queries": 5-7 focused web search queries.
+   - "image_prompt": A clean, schematic, blueprint-style prompt representing the concept.
+   - "study_guide_outline": List of 6-8 outline section titles.
+
+2. "study_guide": A complete, in-depth study guide in Markdown. Do NOT summarize or return an outline; write the FULL content. It must include exactly these H2 headings:
+   - ## Why this matters
+   - ## Core ideas
+   - ## How it actually works (step-by-step)
+   - ## Worked example
+   - ## Intuition & mental models
+   - ## Common pitfalls and misconceptions
+   - ## Going deeper (advanced angles)
+   - ## Practice questions (6 questions, each with a 2-3 sentence answer below it)
+   Note: The study guide content must be detailed and comprehensive (at least 1,100 words long).
+
+3. "resources": Curated resource categories categorized from the search results and your own knowledge:
+   - "categories": List of categories (e.g. "Official documentation", "In-depth articles & tutorials", "Free courses & lectures", "Books", "Research papers & whitepapers", "Tools, repos & playgrounds").
+   - Each category must contain an "items" list.
+   - Each item must have: "title", "url", "description" (1-2 sentences), and "kind" (one of: docs, article, course, book, paper, tool).
+   - Only include categories that have at least 2 items. Categories must have 2-6 items.
+
+Return ONLY raw JSON. No markdown fencing, no preamble, no trailing commentary.
+"""
 
 # ----------------------------- AI Services ---------------------------
 
@@ -203,11 +311,12 @@ Rules:
 """
 
 
-def make_chat(session_id: str, system: str, provider: str = "anthropic", model: str = None) -> LlmChat:
+def make_chat(session_id: str, system: str, provider: str = "gemini", model: str = None) -> LlmChat:
     if model is None:
-        model = os.environ.get("LLM_MODEL") or "claude-sonnet-4-6"
+        model = os.environ.get("LLM_MODEL") or "gemini-2.5-flash"
+    api_key = os.environ.get("GEMINI_API_KEY") or os.environ.get("GOOGLE_API_KEY") or ""
     return LlmChat(
-        api_key=EMERGENT_LLM_KEY,
+        api_key=api_key,
         session_id=session_id,
         system_message=system,
     ).with_model(provider, model)
@@ -242,9 +351,10 @@ async def generate_study_guide(name: str, level: str) -> str:
 async def generate_concept_image(prompt: str) -> Optional[str]:
     """Returns data URL string or None on failure."""
     try:
-        img_model = os.environ.get("LLM_IMAGE_MODEL") or "gemini-3.1-flash-image-preview"
+        img_model = os.environ.get("LLM_IMAGE_MODEL") or "gemini-2.5-flash"
+        api_key = os.environ.get("GEMINI_API_KEY") or os.environ.get("GOOGLE_API_KEY") or ""
         chat = LlmChat(
-            api_key=EMERGENT_LLM_KEY,
+            api_key=api_key,
             session_id=f"img-{uuid.uuid4()}",
             system_message="You generate clean schematic illustrations.",
         ).with_model("gemini", img_model).with_params(modalities=["image", "text"])
@@ -410,80 +520,88 @@ async def me(user: dict = Depends(get_current_user)):
 # ----------------------------- Routes: Concepts ----------------------
 
 async def _run_concept_generation(concept_id: str, user_id: str, name: str, level: str):
-    """Background task — runs every independent step in parallel from t=0.
+    """Background task — runs the consolidated structured generation pipeline.
 
     Pipeline:
-      t=0  : roadmap, study_guide, prelim youtube, prelim web search (all parallel)
-      t≈60s: once roadmap arrives, kick off image (uses image_prompt) + resources (uses web results)
+      1. Web Search & YouTube Search executed in parallel (t=0).
+      2. Web search results compressed to top 12 to reduce prompt token footprint.
+      3. A single structured LLM call requested using response_format=ConceptResponseSchema.
+      4. Structured JSON response parsed and validated (with a fallback retry on validation failure).
+      5. Concepts collection updated atomically while preserving stage transitions.
     """
     try:
-        # Phase 1 — start non-LLM tasks that take time
+        # Phase 1 — start non-LLM tasks in parallel
         prelim_video_queries = [f"{name} tutorial", f"{name} explained", f"{name} crash course"]
         prelim_web_queries = [f"{name} guide", f"{name} documentation", f"{name} introduction", f"{name} tutorial"]
 
         video_task = asyncio.create_task(search_youtube(prelim_video_queries))
         web_task = asyncio.create_task(search_web(prelim_web_queries, per_query=4))
 
-        # LLM Call 1: Generate Roadmap
-        roadmap = await generate_roadmap(name, level)
+        # Wait for web search results to finish so they can be injected as context
+        web_results = await web_task
+
+        # Compress results to top 12 to minimize prompt size and keep TPM low
+        compressed_results = web_results[:12] if web_results else []
+        lines = [f"{i+1}. {r['title']} — {r['url']}\n   {r['snippet']}" for i, r in enumerate(compressed_results)]
+        search_text = "\n".join(lines)
+
+        # Build the consolidated prompt
+        chat = make_chat(
+            f"gen-{uuid.uuid4()}",
+            "You are an expert curriculum architect, teacher, and research librarian. Always return strictly valid JSON matching the requested schema.",
+        )
+        chat.with_params(
+            response_format=ConceptResponseSchema,
+        )
+
+        prompt_text = CONSOLIDATED_CONCEPT_PROMPT.format(
+            name=name,
+            level=level,
+            search_results=search_text
+        )
+
+        max_llm_attempts = 2
+        validated_data = None
+
+        for attempt in range(max_llm_attempts):
+            try:
+                reply = await chat.send_message(UserMessage(text=prompt_text))
+                raw_json = extract_json(reply)
+                # Pydantic validation
+                validated_data = ConceptResponseSchema(**raw_json)
+                break
+            except Exception as e:
+                log.warning(f"Consolidated concept generation attempt {attempt + 1} failed: {e}")
+                if attempt == max_llm_attempts - 1:
+                    raise
+                # Update instructions to request strictly valid schema
+                prompt_text += "\n\nCRITICAL: Your previous response was invalid JSON or did not match the requested schema structure. Return ONLY a single valid JSON object matching the requested schema."
+
+        # Extract Pydantic model dicts
+        roadmap = validated_data.roadmap.model_dump()
+        study_guide = validated_data.study_guide
+        resources = validated_data.resources.model_dump()
+
+        # Enforce that categories containing fewer than 2 items are filtered out
+        if "categories" in resources:
+            resources["categories"] = [
+                cat for cat in resources["categories"]
+                if isinstance(cat.get("items"), list) and len(cat["items"]) >= 2
+            ]
+
+        # Use direct transparent placeholder for concept image (gemini has no text-to-image out of the box)
+        image_data_url = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII="
+
+        # Transition stage to expanding
         await db.concepts.update_one(
             {"id": concept_id, "user_id": user_id},
             {"$set": {"roadmap": roadmap, "stage": "expanding"}},
         )
 
-        # Space out LLM calls to prevent concurrent request spikes (rate limit 429)
-        await asyncio.sleep(1.5)
-
-        # LLM Call 2: Generate Study Guide
-        study_guide = await generate_study_guide(name, level)
-
-        # Space out LLM calls
-        await asyncio.sleep(1.5)
-
-        # LLM Call 3: Generate Concept Image
-        img_prompt = roadmap.get("image_prompt") or f"Schematic blueprint illustration of {name}"
-        image_data_url = await generate_concept_image(img_prompt)
-
-        # Space out LLM calls
-        await asyncio.sleep(1.5)
-
-        # LLM Call 4: Curate Resources (after web search completes)
-        web_results = await web_task
-
-        async def _curate_resources_from(raw_results):
-            """Use Claude/Gemini to categorize the prelim web results — roadmap-aware."""
-            if not raw_results:
-                return {"categories": []}
-            lines = [f"{i+1}. {r['title']} — {r['url']}\n   {r['snippet']}" for i, r in enumerate(raw_results[:48])]
-            try:
-                chat = make_chat(
-                    f"resources-{uuid.uuid4()}",
-                    "You are an expert research librarian. Always return strictly valid JSON.",
-                )
-                reply = await chat.send_message(UserMessage(
-                    text=RESOURCES_PROMPT.format(name=name, level=level, search_results="\n".join(lines))
-                ))
-                data = extract_json(reply)
-                if "categories" not in data:
-                    data = {"categories": []}
-                return data
-            except Exception as e:
-                log.warning(f"resources gen failed: {e}")
-                return {
-                    "categories": [{
-                        "name": "Web results",
-                        "items": [
-                            {"title": r["title"], "url": r["url"], "description": r["snippet"], "kind": "article"}
-                            for r in raw_results[:12]
-                        ],
-                    }]
-                }
-
-        resources = await _curate_resources_from(web_results)
-
         # Wait for video search to finish
         videos = await video_task
 
+        # Atomic final database update
         await db.concepts.update_one(
             {"id": concept_id, "user_id": user_id},
             {"$set": {

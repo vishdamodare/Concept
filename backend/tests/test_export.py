@@ -27,7 +27,17 @@ def H(t):
 @pytest.fixture(scope="module")
 def learner_token():
     r = requests.post(f"{API}/auth/login", json=LEARNER, timeout=15)
-    assert r.status_code == 200, f"learner login failed: {r.status_code} {r.text}"
+    if r.status_code != 200:
+        # Register if not present
+        r_reg = requests.post(f"{API}/auth/register", json={
+            "email": LEARNER["email"],
+            "password": LEARNER["password"],
+            "name": "Learner"
+        }, timeout=15)
+        assert r_reg.status_code == 200, f"Register failed: {r_reg.text}"
+        # Login again
+        r = requests.post(f"{API}/auth/login", json=LEARNER, timeout=15)
+        assert r.status_code == 200, f"Login after register failed: {r.text}"
     return r.json()["token"]
 
 
@@ -45,8 +55,62 @@ def ready_concept(learner_token):
     assert r.status_code == 200
     items = r.json()
     ready = [c for c in items if c.get("status") in (None, "ready")]
-    assert ready, "learner library has no ready concepts; cannot run export tests"
-    return ready[0]  # has id, name
+    if not ready:
+        import pymongo
+        client = pymongo.MongoClient(os.environ.get("MONGO_URL", "mongodb://localhost:27017"))
+        db = client[os.environ.get("DB_NAME", "conceptforge")]
+        user = db.users.find_one({"email": LEARNER["email"]})
+        user_id = user["id"]
+        dummy = {
+            "id": f"dummy-{uuid.uuid4().hex[:8]}",
+            "user_id": user_id,
+            "name": "Quicksort algorithm",
+            "level": "beginner",
+            "status": "ready",
+            "stage": "done",
+            "roadmap": {
+                "summary": "Quicksort is an efficient sorting algorithm.",
+                "prerequisites": ["Arrays", "Recursion"],
+                "milestones": [
+                    {
+                        "title": "Introduction to Quicksort",
+                        "description": "Understand the basic divide-and-conquer strategy.",
+                        "topics": ["Divide and conquer", "Partitioning"],
+                        "key_questions": ["What is partitioning?"],
+                        "exercise": "Trace quicksort manually.",
+                        "estimate": "1 hour"
+                    }
+                ],
+                "video_queries": ["quicksort animation"],
+                "search_queries": ["quicksort complexity"],
+                "image_prompt": "schematic layout of quicksort partition step",
+                "study_guide_outline": ["Intro", "Partition", "Complexity"]
+            },
+            "study_guide": "## Why this matters\nSorting is key.\n## Core ideas\nDivide and conquer.\n## How it actually works (step-by-step)\nChoose pivot.\n## Worked example\n[3, 1, 2] -> [1, 2, 3]\n## Intuition & mental models\nPartitioning books.\n## Common pitfalls and misconceptions\nBad pivot choices.\n## Going deeper (advanced angles)\nIn-place quicksort.\n## Practice questions\n1. What is worst case?\nAnswer: O(N^2) if sorted and bad pivot.\n2. Space complexity?\nAnswer: O(log N).\n3. Stable?\nAnswer: Not stable.\n4. Pivot choice?\nAnswer: Random is best.\n5. Average case?\nAnswer: O(N log N).\n6. When to use?\nAnswer: General sorting.",
+            "videos": [
+                {
+                    "title": "Quicksort Algorithm",
+                    "embed": "https://www.youtube.com/embed/vector_sort"
+                }
+            ],
+            "resources": {
+                "categories": [
+                    {
+                        "name": "Official documentation",
+                        "items": [
+                            {"title": "Python lists doc", "url": "https://docs.python.org", "description": "Docs on list operations", "kind": "docs"},
+                            {"title": "C++ Sort doc", "url": "https://cppreference.com", "description": "Reference on std::sort", "kind": "docs"}
+                        ]
+                    }
+                ]
+            },
+            "created_at": "2026-06-09T14:16:56.924612+00:00"
+        }
+        db.concepts.insert_one(dummy)
+        r = requests.get(f"{API}/concepts", headers=H(learner_token), timeout=15)
+        items = r.json()
+        ready = [c for c in items if c.get("status") in (None, "ready")]
+    return ready[0]
 
 
 # ---------------- Happy path: Markdown ----------------
