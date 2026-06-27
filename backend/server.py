@@ -417,26 +417,41 @@ async def _run_concept_generation(concept_id: str, user_id: str, name: str, leve
       t≈60s: once roadmap arrives, kick off image (uses image_prompt) + resources (uses web results)
     """
     try:
-        # Phase 1 — start everything that doesn't need roadmap output
+        # Phase 1 — start non-LLM tasks that take time
         prelim_video_queries = [f"{name} tutorial", f"{name} explained", f"{name} crash course"]
         prelim_web_queries = [f"{name} guide", f"{name} documentation", f"{name} introduction", f"{name} tutorial"]
 
-        roadmap_task = asyncio.create_task(generate_roadmap(name, level))
-        guide_task = asyncio.create_task(generate_study_guide(name, level))
         video_task = asyncio.create_task(search_youtube(prelim_video_queries))
         web_task = asyncio.create_task(search_web(prelim_web_queries, per_query=4))
 
-        # Wait for roadmap; once it lands we can start image + resources curation
-        roadmap = await roadmap_task
+        # LLM Call 1: Generate Roadmap
+        roadmap = await generate_roadmap(name, level)
         await db.concepts.update_one(
             {"id": concept_id, "user_id": user_id},
             {"$set": {"roadmap": roadmap, "stage": "expanding"}},
         )
 
+        # Space out LLM calls to prevent concurrent request spikes (rate limit 429)
+        await asyncio.sleep(1.5)
+
+        # LLM Call 2: Generate Study Guide
+        study_guide = await generate_study_guide(name, level)
+
+        # Space out LLM calls
+        await asyncio.sleep(1.5)
+
+        # LLM Call 3: Generate Concept Image
         img_prompt = roadmap.get("image_prompt") or f"Schematic blueprint illustration of {name}"
+        image_data_url = await generate_concept_image(img_prompt)
+
+        # Space out LLM calls
+        await asyncio.sleep(1.5)
+
+        # LLM Call 4: Curate Resources (after web search completes)
+        web_results = await web_task
 
         async def _curate_resources_from(raw_results):
-            """Use Claude to categorize the prelim web results — roadmap-aware."""
+            """Use Claude/Gemini to categorize the prelim web results — roadmap-aware."""
             if not raw_results:
                 return {"categories": []}
             lines = [f"{i+1}. {r['title']} — {r['url']}\n   {r['snippet']}" for i, r in enumerate(raw_results[:48])]
@@ -464,15 +479,10 @@ async def _run_concept_generation(concept_id: str, user_id: str, name: str, leve
                     }]
                 }
 
-        image_task = asyncio.create_task(generate_concept_image(img_prompt))
-        # Wait for web search to finish, then curate. guide + videos already running.
-        web_results = await web_task
-        resources_task = asyncio.create_task(_curate_resources_from(web_results))
+        resources = await _curate_resources_from(web_results)
 
-        # Now wait for everything to finish
-        study_guide, image_data_url, videos, resources = await asyncio.gather(
-            guide_task, image_task, video_task, resources_task
-        )
+        # Wait for video search to finish
+        videos = await video_task
 
         await db.concepts.update_one(
             {"id": concept_id, "user_id": user_id},
