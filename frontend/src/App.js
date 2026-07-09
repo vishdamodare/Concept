@@ -1,6 +1,6 @@
 import React from "react";
 import "@/App.css";
-import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
+import { BrowserRouter, Routes, Route, Navigate, useLocation } from "react-router-dom";
 import { Toaster } from "sonner";
 
 import { AuthProvider, useAuth } from "./lib/auth";
@@ -10,6 +10,7 @@ import Login from "./pages/Login";
 import Register from "./pages/Register";
 import Dashboard from "./pages/Dashboard";
 import ConceptDetail from "./pages/ConceptDetail";
+import AuthCallback from "./pages/AuthCallback";
 
 function Protected({ children }) {
   const { user, bootstrapped } = useAuth();
@@ -24,9 +25,14 @@ function Protected({ children }) {
   return children;
 }
 
-function Shell() {
+function AppRouter() {
+  const location = useLocation();
+  // Detect Emergent auth callback synchronously (not in useEffect) — prevents race conditions.
+  if (location.hash?.includes("session_id=")) {
+    return <AuthCallback />;
+  }
   return (
-    <div className="min-h-screen flex flex-col">
+    <>
       <NavBar />
       <main className="flex-1">
         <Routes>
@@ -38,7 +44,7 @@ function Shell() {
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
       </main>
-    </div>
+    </>
   );
 }
 
@@ -57,7 +63,9 @@ export default function App() {
             },
           }}
         />
-        <Shell />
+        <div className="min-h-screen flex flex-col">
+          <AppRouter />
+        </div>
       </BrowserRouter>
     </AuthProvider>
   );

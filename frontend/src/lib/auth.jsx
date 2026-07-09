@@ -8,6 +8,12 @@ export const AuthProvider = ({ children }) => {
   const [bootstrapped, setBootstrapped] = useState(false);
 
   useEffect(() => {
+    // CRITICAL: If returning from Emergent OAuth callback, skip /me check.
+    // AuthCallback will exchange the session_id and establish the session first.
+    if (typeof window !== "undefined" && window.location.hash?.includes("session_id=")) {
+      setBootstrapped(true);
+      return;
+    }
     apiClient
       .get("/auth/me")
       .then((r) => setUser(r.data))
@@ -32,6 +38,8 @@ export const AuthProvider = ({ children }) => {
     return r.data;
   };
 
+  const setSessionUser = (u) => setUser(u);
+
   const logout = async () => {
     try { await apiClient.post("/auth/logout"); } catch (e) { /* ignore */ }
     localStorage.removeItem("cf_token");
@@ -39,7 +47,7 @@ export const AuthProvider = ({ children }) => {
   };
 
   return (
-    <AuthCtx.Provider value={{ user, login, register, logout, bootstrapped }}>
+    <AuthCtx.Provider value={{ user, login, register, logout, setSessionUser, bootstrapped }}>
       {children}
     </AuthCtx.Provider>
   );
