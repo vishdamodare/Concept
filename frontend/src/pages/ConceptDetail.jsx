@@ -182,7 +182,7 @@ function RoadmapTab({ concept, onToggle }) {
           ) : (
             <ul className="font-mono text-sm space-y-2">
               {(rm.prerequisites || []).map((p, i) => (
-                <li key={i} className="flex gap-2"><span className="text-[#002FA7]">▸</span> <span>{p}</span></li>
+                <li key={p || i} className="flex gap-2"><span className="text-[#002FA7]">▸</span> <span>{p}</span></li>
               ))}
             </ul>
           )}
@@ -197,7 +197,7 @@ function RoadmapTab({ concept, onToggle }) {
             return (
               <div
                 data-testid={`milestone-${i}`}
-                key={i}
+                key={m.title || `milestone-${i}`}
                 className={`brut-card p-6 transition ${isDone ? "bg-zinc-50" : ""}`}
               >
                 <div className="flex items-start justify-between gap-3">
@@ -224,7 +224,7 @@ function RoadmapTab({ concept, onToggle }) {
                     {m.topics && m.topics.length > 0 && (
                       <div className="mt-3 flex flex-wrap gap-2">
                         {m.topics.map((t, k) => (
-                          <span key={k} className="border border-black px-2 py-0.5 font-mono text-[11px]">{t}</span>
+                          <span key={t || k} className="border border-black px-2 py-0.5 font-mono text-[11px]">{t}</span>
                         ))}
                       </div>
                     )}
@@ -236,7 +236,7 @@ function RoadmapTab({ concept, onToggle }) {
                         </div>
                         <ul className="font-mono text-sm space-y-1 text-zinc-700">
                           {m.key_questions.map((q, k) => (
-                            <li key={k}>· {q}</li>
+                            <li key={q || k}>· {q}</li>
                           ))}
                         </ul>
                       </div>

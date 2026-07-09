@@ -26,14 +26,12 @@ export const AuthProvider = ({ children }) => {
 
   const login = async (email, password) => {
     const r = await apiClient.post("/auth/login", { email, password });
-    if (r.data.token) localStorage.setItem("cf_token", r.data.token);
     setUser(r.data);
     return r.data;
   };
 
   const register = async (name, email, password) => {
     const r = await apiClient.post("/auth/register", { name, email, password });
-    if (r.data.token) localStorage.setItem("cf_token", r.data.token);
     setUser(r.data);
     return r.data;
   };
@@ -41,7 +39,7 @@ export const AuthProvider = ({ children }) => {
   const setSessionUser = (u) => setUser(u);
 
   const logout = async () => {
-    try { await apiClient.post("/auth/logout"); } catch (e) { /* ignore */ }
+    try { await apiClient.post("/auth/logout"); } catch (e) { /* ignore network errors during logout */ }
     localStorage.removeItem("cf_token");
     setUser(false);
   };
