@@ -8,6 +8,12 @@ export const AuthProvider = ({ children }) => {
   const [bootstrapped, setBootstrapped] = useState(false);
 
   useEffect(() => {
+    // CRITICAL: If returning from Emergent OAuth callback, skip /me check.
+    // AuthCallback will exchange the session_id and establish the session first.
+    if (typeof window !== "undefined" && window.location.hash?.includes("session_id=")) {
+      setBootstrapped(true);
+      return;
+    }
     apiClient
       .get("/auth/me")
       .then((r) => setUser(r.data))
@@ -20,26 +26,26 @@ export const AuthProvider = ({ children }) => {
 
   const login = async (email, password) => {
     const r = await apiClient.post("/auth/login", { email, password });
-    if (r.data.token) localStorage.setItem("cf_token", r.data.token);
     setUser(r.data);
     return r.data;
   };
 
   const register = async (name, email, password) => {
     const r = await apiClient.post("/auth/register", { name, email, password });
-    if (r.data.token) localStorage.setItem("cf_token", r.data.token);
     setUser(r.data);
     return r.data;
   };
 
+  const setSessionUser = (u) => setUser(u);
+
   const logout = async () => {
-    try { await apiClient.post("/auth/logout"); } catch (e) { /* ignore */ }
+    try { await apiClient.post("/auth/logout"); } catch (e) { /* ignore network errors during logout */ }
     localStorage.removeItem("cf_token");
     setUser(false);
   };
 
   return (
-    <AuthCtx.Provider value={{ user, login, register, logout, bootstrapped }}>
+    <AuthCtx.Provider value={{ user, login, register, logout, setSessionUser, bootstrapped }}>
       {children}
     </AuthCtx.Provider>
   );

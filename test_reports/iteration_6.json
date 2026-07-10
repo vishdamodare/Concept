@@ -1,0 +1,52 @@
+{
+  "summary": "Iteration 6 (Emergent Google Auth alongside JWT) — Backend: 10/10 new pytest tests in /app/backend/tests/test_google_auth.py PASS in ~14s. Covers: user_sessions indexes exist (session_token unique + expires_at TTL), POST /api/auth/session missing→400, bogus session_id→401, session_token accepted via Authorization: Bearer AND via cookie, expired session→401 on both cookie and header, /api/auth/logout deletes the row from db.user_sessions and clears both cookies in Set-Cookie response, user upsert reuses existing user_id when Google email matches an existing JWT user (learner@conceptforge.app resolves to the same id via both flows; only 1 user row per email), JWT email/password flow still works (regression) and both auth types coexist on the same endpoint. Frontend: /login shows login-google-btn ('CONTINUE WITH GOOGLE') and /register shows register-google-btn ('SIGN UP WITH GOOGLE'), both type=button, both placed below the OR divider. Clicking navigates to https://auth.emergentagent.com/?redirect=<origin>/app (Emergent then redirects to /oauth/ — expected). Loading /login#session_id=fake-abc-12345 synchronously renders AuthCallback view ('Signing you in'), immediately POSTs /api/auth/session with X-Session-ID header, does NOT call GET /api/auth/me first (race prevention confirmed), and on the 401 response redirects back to /login. Injecting a real session_token cookie into browser context → GET /api/auth/me returns learner, /app loads Dashboard, NavBar shows 'learner@conceptforge.app' with Logout button; Logout button navigates to /login and clears session_token cookie in browser AND deletes the row from db.user_sessions (verified via mongosh, remaining=0). Regression: 7/7 auth tests in test_conceptforge.py still pass. 8 unrelated failures in concept-generation/chat tests are due to EMERGENT_LLM_KEY returning 'Invalid API key' from litellm/OpenAI proxy — this is an LLM infrastructure issue, NOT introduced by iteration 6 (auth code is untouched by iteration 6's concept flow).",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {"endpoint": "/api/concepts/generate & /api/concepts/{id}/chat", "issue": "EMERGENT_LLM_KEY currently rejected by upstream ('litellm.AuthenticationError: OpenAIException - Invalid API key'). Concept generation and tutor chat both fail with 500/failed. This is preexisting infra, not caused by iteration 6, but flagged so the main agent is aware — 8/23 tests in test_conceptforge.py fail because of it."}
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [
+      {"component": "GoogleSignInButton (Login.jsx & Register.jsx)", "issue": "Spec says buttons should NOT be inside the <form> to avoid form submission; in current code they ARE inside the form. It is functionally safe because the buttons have type='button', so no submission happens on click. Purely a spec-letter deviation — not blocking.", "selector": "[data-testid=login-google-btn], [data-testid=register-google-btn]", "priority": "LOW"}
+    ],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_google_auth.py",
+    "/app/test_reports/pytest/pytest_google_auth.xml",
+    "/app/test_reports/pytest/pytest_regression.xml"
+  ],
+  "action_items": [
+    "Investigate EMERGENT_LLM_KEY — currently upstream returns 'Invalid API key' for Claude requests via litellm, breaking concept generation & tutor chat. Unrelated to iteration 6 but a real user-visible outage.",
+    "OPTIONAL (spec nit): Move GoogleSignInButton outside the <form> on Login/Register pages to strictly match the spec — currently inside but safe due to type='button'."
+  ],
+  "critical_code_review_comments": [
+    "get_current_user correctly tries the session_token cookie first, then access_token cookie, then Authorization header (session_token first, JWT fallback). Both auth systems coexist cleanly.",
+    "_resolve_session_token defensively handles expires_at stored as either ISO string OR BSON date, and normalizes naive datetimes to UTC before comparing — good.",
+    "/auth/session upserts user by email so a Google login for an existing JWT-email user REUSES the same user_id (verified — no duplicate row). name/picture are updated on the existing user; new fields (auth_provider, picture) added only for brand-new users.",
+    "/auth/logout deletes the session_token row from db.user_sessions BEFORE clearing cookies. delete_cookie for session_token correctly passes samesite='none' + secure=True so browsers accept the deletion.",
+    "Startup creates two required indexes on db.user_sessions: unique on session_token, TTL on expires_at (expireAfterSeconds=0). Verified via mongosh — both present.",
+    "AuthProvider (auth.jsx) skips /auth/me when window.location.hash contains 'session_id=' — race prevention works. Verified: only POST /auth/session fires on hash-return, no GET /auth/me before it.",
+    "App.js AppRouter renders AuthCallback synchronously when location.hash includes 'session_id=' — prevents flash of login UI during OAuth return.",
+    "AuthCallback.jsx uses a useRef guard (hasProcessed) so React 18 StrictMode double-mount does NOT call /auth/session twice. Good defensive pattern.",
+    "GoogleSignInButton builds the redirect from window.location.origin + '/app' — no hardcoded URL. Correct per the reminder comment.",
+    "Cookie config split correctly: JWT access_token uses samesite='lax' + secure=False (works for same-site email/password), while session_token uses samesite='none' + secure=True (required for the cross-site OAuth redirect flow).",
+    "Minor code-quality observation (non-blocking): the POST /auth/session endpoint returns session_token in JSON body AS WELL AS setting it as an httpOnly cookie. The JSON-returned token is redundant for browser clients (frontend never reads it — it only uses setSessionUser + cookie). Consider dropping it from the response for defense-in-depth, but this is not a bug.",
+    "Minor observation: 'from fastapi import ... Body' is imported but unused in server.py. Cosmetic."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_google_auth.py (new — 10 tests, all passing)"
+  ],
+  "success_rate": {
+    "backend": "100% for iteration 6 scope (10/10 new + 7/7 auth regression). test_conceptforge non-auth suite shows 8 failures caused by unrelated EMERGENT_LLM_KEY outage.",
+    "frontend": "100% (Google buttons present + type=button, click navigation, hash callback flow, race prevention, session-cookie login, NavBar email, logout deletes DB row & clears cookie)"
+  },
+  "test_credentials": "learner@conceptforge.app / learner123 (JWT), admin@conceptforge.app / admin123. Google flow simulated by inserting rows into db.user_sessions via mongosh per /app/auth_testing.md.",
+  "seed_data_creation": "Each Google-auth test creates ephemeral users (google_user_*, exp_user_*, lo_user_*, dual_*) and session tokens (testsess_*, expired_*, logout_*, dual_*, reuse_*) and deletes them in teardown. One extra transient session bound to the existing learner user was created and deleted (verified remaining=0). No persistent test data.",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Iteration 6 acceptance complete. Backend: /api/auth/session accepts session_id via X-Session-ID header OR JSON body; missing=400, invalid=401 (Emergent upstream 4xx/5xx). session_token accepted via cookie (name 'session_token', httponly+secure+samesite=none) OR Authorization: Bearer. JWT access_token cookie (samesite=lax+secure=false) still works. get_current_user tries session_token first. /auth/logout deletes the db.user_sessions row for the incoming session_token cookie and clears BOTH cookies. Indexes on db.user_sessions: {session_token:1 unique}, {expires_at:1 TTL 0s}. Frontend testids: login-google-btn, register-google-btn, auth-callback. IMPORTANT for future testing agents: To simulate a successful Google login without hitting Emergent OAuth, insert a row into conceptforge_db.user_sessions with a matching user_id (query learner's id from db.users) and set a cookie with page.context.add_cookies name=session_token samesite='None' secure=True. Then GET /api/auth/me returns that user. Also: the concept-generation/chat regression failures in test_conceptforge.py are due to an EMERGENT_LLM_KEY upstream 'Invalid API key' error and are NOT related to iteration 6.",
+  "rca of the issue": "No auth issues found. For the LLM regression failures: root cause is upstream litellm/OpenAI proxy returning 'Invalid API key' for the current EMERGENT_LLM_KEY. Reproduce: POST /api/concepts/generate as an authenticated user → concept status flips to 'failed' with error 'Failed to generate chat completion: litellm.AuthenticationError: AuthenticationError: OpenAIException - Invalid API key'. Same key/proxy is used for chat, so /api/concepts/{id}/chat returns 500 with the same error. Mitigation is out of scope for iteration 6 (auth-only iteration) and requires rotating/validating the EMERGENT_LLM_KEY value in /app/backend/.env."
+}

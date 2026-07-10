@@ -3,6 +3,7 @@ import { useNavigate, Link, useLocation } from "react-router-dom";
 import { useAuth } from "../lib/auth";
 import { formatErr } from "../lib/api";
 import { toast } from "sonner";
+import GoogleSignInButton from "../components/GoogleSignInButton";
 
 export default function Login() {
   const { login } = useAuth();
@@ -55,6 +56,16 @@ export default function Login() {
         <button data-testid="login-submit-btn" disabled={busy} type="submit" className="brut-btn w-full justify-center mt-8">
           {busy ? "Signing in…" : "Sign in"}
         </button>
+
+        <div className="mt-6 flex items-center gap-3">
+          <div className="flex-1 h-px bg-zinc-200" />
+          <span className="font-mono text-[10px] uppercase tracking-widest text-zinc-500">or</span>
+          <div className="flex-1 h-px bg-zinc-200" />
+        </div>
+
+        <div className="mt-6">
+          <GoogleSignInButton testId="login-google-btn" label="Continue with Google" />
+        </div>
 
         <p className="mt-6 font-mono text-xs text-zinc-600 text-center">
           No account?{" "}

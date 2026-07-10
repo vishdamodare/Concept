@@ -15,6 +15,7 @@ from typing import List, Optional, Annotated
 import certifi
 
 import bcrypt
+import httpx
 import jwt
 import markdown as md_lib
 from fastapi import FastAPI, APIRouter, HTTPException, Request, Response, Depends, Body
@@ -110,14 +111,57 @@ def set_auth_cookie(response: Response, token: str):
         max_age=60 * 60 * 24 * 7, path="/",
     )
 
+def set_session_cookie(response: Response, token: str):
+    # httponly + secure + samesite=none for cross-site OAuth flow
+    response.set_cookie(
+        key="session_token", value=token,
+        httponly=True, secure=True, samesite="none",
+        max_age=60 * 60 * 24 * 7, path="/",
+    )
+
+async def _resolve_session_token(token: str) -> Optional[dict]:
+    session = await db.user_sessions.find_one({"session_token": token}, {"_id": 0})
+    if not session:
+        return None
+    exp = session.get("expires_at")
+    if isinstance(exp, str):
+        try:
+            exp = datetime.fromisoformat(exp)
+        except Exception:
+            exp = None
+    if exp is not None:
+        if exp.tzinfo is None:
+            exp = exp.replace(tzinfo=timezone.utc)
+        if exp < datetime.now(timezone.utc):
+            return None
+    user = await db.users.find_one({"id": session["user_id"]}, {"_id": 0, "password_hash": 0})
+    return user
+
 async def get_current_user(request: Request) -> dict:
+    # 1) session_token cookie (Google/Emergent auth)
+    st = request.cookies.get("session_token")
+    if st:
+        user = await _resolve_session_token(st)
+        if user:
+            return user
+
+    # 2) access_token cookie (email/password JWT)
     token = request.cookies.get("access_token")
+
+    # 3) Authorization header may hold either a JWT or a session_token
     if not token:
         auth = request.headers.get("Authorization", "")
         if auth.startswith("Bearer "):
-            token = auth[7:]
+            raw = auth[7:]
+            # Try session_token first
+            user = await _resolve_session_token(raw)
+            if user:
+                return user
+            token = raw
+
     if not token:
         raise HTTPException(status_code=401, detail="Not authenticated")
+
     try:
         payload = jwt.decode(token, JWT_SECRET, algorithms=[JWT_ALG])
         user = await db.users.find_one({"id": payload["sub"]}, {"_id": 0, "password_hash": 0})
@@ -509,9 +553,91 @@ async def login(body: LoginIn, response: Response):
     return {"id": user["id"], "email": email, "name": user.get("name", ""), "token": token}
 
 @api.post("/auth/logout")
-async def logout(response: Response):
+async def logout(request: Request, response: Response):
+    # Clear both cookie types + remove session from DB if present
+    st = request.cookies.get("session_token")
+    if st:
+        try:
+            await db.user_sessions.delete_one({"session_token": st})
+        except Exception:
+            pass
     response.delete_cookie("access_token", path="/")
+    response.delete_cookie("session_token", path="/", samesite="none", secure=True)
     return {"ok": True}
+
+
+# REMINDER: DO NOT HARDCODE THE URL, OR ADD ANY FALLBACKS OR REDIRECT URLS, THIS BREAKS THE AUTH
+@api.post("/auth/session")
+async def exchange_session(request: Request, response: Response):
+    """Exchange an Emergent session_id (from URL fragment) for a persistent session_token."""
+    session_id = request.headers.get("X-Session-ID") or request.headers.get("x-session-id")
+    if not session_id:
+        # Some clients pass it in JSON body
+        try:
+            body = await request.json()
+            session_id = (body or {}).get("session_id")
+        except Exception:
+            session_id = None
+    if not session_id:
+        raise HTTPException(status_code=400, detail="Missing session_id")
+
+    try:
+        async with httpx.AsyncClient(timeout=15) as client:
+            r = await client.get(
+                "https://demobackend.emergentagent.com/auth/v1/env/oauth/session-data",
+                headers={"X-Session-ID": session_id},
+            )
+    except Exception as e:
+        log.exception("emergent session lookup failed")
+        raise HTTPException(status_code=502, detail=f"Auth provider unreachable: {e}")
+
+    if r.status_code != 200:
+        raise HTTPException(status_code=401, detail="Invalid or expired session_id")
+
+    data = r.json()
+    email = (data.get("email") or "").lower().strip()
+    name = (data.get("name") or "").strip()
+    picture = (data.get("picture") or "").strip()
+    session_token = data.get("session_token")
+    if not (email and session_token):
+        raise HTTPException(status_code=502, detail="Auth provider returned invalid data")
+
+    # Upsert user by email (link if a JWT user already exists with same email)
+    existing = await db.users.find_one({"email": email}, {"_id": 0})
+    now_iso = datetime.now(timezone.utc).isoformat()
+    if existing:
+        update = {"name": name or existing.get("name") or "", "picture": picture or existing.get("picture")}
+        await db.users.update_one({"id": existing["id"]}, {"$set": update})
+        user_id = existing["id"]
+        user_name = update["name"]
+    else:
+        user_id = str(uuid.uuid4())
+        await db.users.insert_one({
+            "id": user_id,
+            "email": email,
+            "name": name or email.split("@")[0],
+            "picture": picture,
+            "role": "user",
+            "auth_provider": "google",
+            "created_at": now_iso,
+        })
+        user_name = name or email.split("@")[0]
+
+    # Persist session_token with 7-day expiry
+    expires_at = datetime.now(timezone.utc) + timedelta(days=7)
+    await db.user_sessions.update_one(
+        {"session_token": session_token},
+        {"$set": {
+            "session_token": session_token,
+            "user_id": user_id,
+            "created_at": datetime.now(timezone.utc),
+            "expires_at": expires_at,
+        }},
+        upsert=True,
+    )
+
+    set_session_cookie(response, session_token)
+    return {"id": user_id, "email": email, "name": user_name, "picture": picture, "session_token": session_token}
 
 @api.get("/auth/me")
 async def me(user: dict = Depends(get_current_user)):
@@ -915,6 +1041,8 @@ async def on_startup():
         await db.users.create_index("email", unique=True)
         await db.concepts.create_index([("user_id", 1), ("created_at", -1)])
         await db.chat_messages.create_index([("concept_id", 1), ("created_at", 1)])
+        await db.user_sessions.create_index("session_token", unique=True)
+        await db.user_sessions.create_index("expires_at", expireAfterSeconds=0)
 
         # Seed admin
         admin_email = os.environ.get("ADMIN_EMAIL", "admin@conceptforge.app").lower()

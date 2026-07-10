@@ -3,15 +3,13 @@ import axios from "axios";
 const BACKEND_URL = process.env.REACT_APP_BACKEND_URL || process.env.REACT_APP_API_URL || "";
 export const API = BACKEND_URL ? `${BACKEND_URL}/api` : "/api";
 
+// httpOnly cookies (access_token for JWT, session_token for Google OAuth) are the
+// authoritative auth store. `withCredentials` ensures they're sent on every call.
+// We intentionally do NOT persist tokens in localStorage/sessionStorage — that would
+// expose them to any XSS payload.
 export const apiClient = axios.create({
   baseURL: API,
   withCredentials: true,
-});
-
-apiClient.interceptors.request.use((config) => {
-  const token = localStorage.getItem("cf_token");
-  if (token) config.headers.Authorization = `Bearer ${token}`;
-  return config;
 });
 
 export const formatErr = (e) => {

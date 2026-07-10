@@ -38,8 +38,6 @@ export default function Dashboard() {
   // Auto-generate if landed with ?seed=
   useEffect(() => {
     if (seed && concept === seed && !busy) {
-      // run once
-      // eslint-disable-next-line
       handleGenerate(seed, level);
       setSp({}, { replace: true });
     }
@@ -133,7 +131,7 @@ export default function Dashboard() {
                 <div className="label-tag mb-3">// LIVE</div>
                 <div className="font-mono text-sm leading-relaxed">
                   {STAGES.map((s, i) => (
-                    <div key={i} className={`flex items-center gap-2 ${i === stage ? "text-black" : i < stage ? "text-zinc-400" : "text-zinc-300"}`}>
+                    <div key={s} className={`flex items-center gap-2 ${i === stage ? "text-black" : i < stage ? "text-zinc-400" : "text-zinc-300"}`}>
                       <span>{i < stage ? "✓" : i === stage ? "▸" : "·"}</span>
                       <span>{s}</span>
                     </div>
